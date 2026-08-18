@@ -8,20 +8,26 @@ analysis_task:
 
 architecture_task:
   description: >
-    Lee el resumen del Analista. Tu deber es crear los planos técnicos.
+    Tu deber es crear los planos técnicos respetando las reglas globales.
     
-    PASO 1: Usa tu herramienta 'Ejecutar OpenSpec' pasándole exactamente esto: new change "{ticket_id}"
-    Esto creará una nueva carpeta para el ticket con plantillas en blanco.
+    PASO 1: Usa tu herramienta de lectura para abrir el archivo '../CONTEXT.md'. 
+    IMPORTANTE: No intentes memorizar todo el texto. Extrae y resume ÚNICAMENTE 
+    las reglas clave de arquitectura, tecnologías permitidas y convenciones de código.
     
-    PASO 2: Usa la herramienta 'Escribir Archivo en Raiz' para rellenar con información técnica 
-    los archivos 'proposal.md' y 'design.md' que OpenSpec acaba de crear para este cambio.
+    PASO 2: Usa la herramienta 'Ejecutar OpenSpec' pasándole: new change "{ticket_id}"
+    Presta atención al nombre exacto de la carpeta que la terminal te devuelva.
+    
+    PASO 3: Usa la herramienta 'Escribir Archivo en Raiz' para rellenar 'openspec/changes/<carpeta-del-cambio>/proposal.md' y 'design.md' con información técnica basada en las reglas que resumiste.
+    
+    PASO 4: Usa la herramienta 'Escribir Archivo en Raiz' para crear las especificaciones dentro de 'openspec/changes/<carpeta-del-cambio>/specs/<nombre-capacidad>/spec.md'.
+    Asegúrate de incluir los encabezados de requisitos (ej. ## ADDED Requirements) y los escenarios con cuatro almohadillas (#### Scenario:).
   expected_output: >
-    Documentos de propuesta y diseño creados y guardados correctamente.
+    Documentos de propuesta, diseño y specs detallados, guardados correctamente respetando las reglas clave del CONTEXT.md.
   agent: arquitect
 
 coding_task:
   description: >
-    Lee los documentos de diseño que acaba de crear el Arquitecto.
+    Lee los documentos de diseño y especificaciones que acaba de crear el Arquitecto.
     Escribe el código requerido.
     Usa tu herramienta 'Escribir Archivo en Raiz' para guardar CADA UNO de los archivos de código nuevos.
     Solo pasa la ruta interna de la aplicación (ejemplo: 'apps/web/package.json') y el código.
@@ -31,10 +37,9 @@ coding_task:
 
 review_task:
   description: >
-    Revisa el código escrito por el Programador y compáralo con el diseño técnico.
-    Si todo está correcto y cumple con los criterios, usa tu herramienta 'Ejecutar OpenSpec' 
+    Revisa el código escrito por el Programador y compáralo con el diseño y las especificaciones.
+    Si todo está correcto, usa tu herramienta 'Ejecutar OpenSpec' 
     para archivar el cambio ejecutando el comando: archive <nombre-de-la-carpeta-de-cambio>
-    para consolidar la documentación oficial de OpenSpec.
   expected_output: >
-    Confirmación de que el código ha sido revisado y el cambio archivado exitosamente en OpenSpec.
+    Confirmación de que el código ha sido revisado y el cambio archivado exitosamente.
   agent: reviewer

@@ -46,7 +46,8 @@ class KotyAppCrew:
             verbose=True,
             allow_delegation=False,
             llm=_zen_llm("ZEN_MANAGER_MODEL"),
-            tools=[ejecutar_openspec]
+            # Ahora el arquitecto puede leer el contexto y escribir las especificaciones
+            tools=[herramienta_leer, ejecutar_openspec, escribir_archivo_raiz]
         )
 
     @agent
