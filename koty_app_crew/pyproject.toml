@@ -1,0 +1,20 @@
+[project]
+name = "koty_app_crew"
+version = "0.1.0"
+description = "koty-app-crew using crewAI"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "crewai[tools]==1.15.16"
+]
+
+[project.scripts]
+koty_app_crew = "koty_app_crew.main:run"
+run_crew = "koty_app_crew.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.crewai]
+type = "crew"

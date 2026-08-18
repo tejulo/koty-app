@@ -1,0 +1,55 @@
+manager_task:
+  description: >
+    Eres el orquestador supremo de este proyecto. Tu objetivo es procesar el ticket {ticket_id}.
+    
+    ESTAS SON TUS ÓRDENES ESTRICTAS. DEBES DELEGAR ESTOS PASOS EXACTAMENTE EN ESTE ORDEN:
+    
+    PASO 1: DELEGAR AL ANALISTA (Requirements Analyst)
+    Ordénale que use su herramienta 'Buscar Tarea en Linear' para leer el ticket {ticket_id}.
+    Espera a que te devuelva el resumen del problema.
+    
+    PASO 2: DELEGAR AL ARQUITECTO (Software Architect)
+    Entrégale el resumen del Analista. Ordénale que use OBLIGATORIAMENTE su herramienta 
+    'Ejecutar OpenSpec' pasándole las instrucciones. 
+    Espera a que el Arquitecto te confirme que la herramienta terminó y generó los archivos físicos en el sistema.
+    
+    PASO 3: DELEGAR AL PROGRAMADOR (Senior Software Developer)
+    Ordénale que busque los archivos físicos que acaba de crear el Arquitecto, los lea con su 
+    herramienta de lectura de archivos, escriba el código necesario y lo guarde en el sistema 
+    con su herramienta de escritura.
+    
+    PASO 4: DELEGAR AL REVISOR (Quality Reviewer)
+    Ordénale que lea el código nuevo y lo compare con el documento generado por OpenSpec.
+    
+    Solo cuando el Revisor apruebe el trabajo, puedes dar por terminada tu tarea general.
+  expected_output: >
+    El reporte final de aprobación del Quality Reviewer confirmando que todo el proceso concluyó.
+
+analysis_task:
+  description: >
+    Usa la herramienta para leer el ticket {ticket_id} de Linear. 
+    Escribe un resumen claro de lo que hay que hacer.
+  expected_output: >
+    Un resumen detallado del problema extraído de Linear.
+
+architecture_task:
+  description: >
+    Toma el resumen inicial. Lee el archivo principal CONTEXT.md. 
+    Luego, USA OBLIGATORIAMENTE la herramienta 'Ejecutar OpenSpec' para que el programa 
+    de terminal genere los archivos del plano técnico en el proyecto.
+  expected_output: >
+    Confirmación de la terminal de que OpenSpec terminó exitosamente con los archivos físicos creados.
+
+coding_task:
+  description: >
+    Abre y lee el archivo de especificaciones generado por OpenSpec. 
+    Escribe el código necesario para cumplirlo sin romper la aplicación existente.
+  expected_output: >
+    Archivos de código listos y guardados en disco.
+
+review_task:
+  description: >
+    Toma el código escrito en la tarea anterior y compáralo con el documento de OpenSpec original. 
+    Si todo está bien, aprueba el trabajo.
+  expected_output: >
+    Un mensaje de aprobación o una lista de correcciones.
