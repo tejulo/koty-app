@@ -1,0 +1,74 @@
+analysis_task:
+  description: >
+    Usa tu herramienta 'Buscar Tarea en Linear' para leer el ticket {ticket_id}.
+    Extrae la descripción exacta y los criterios de aceptación.
+  expected_output: >
+    Un resumen de texto claro sobre lo que hay que construir.
+  agent: analyst
+
+analysis_task:
+  description: >
+    Usa tu herramienta 'Buscar Tarea en Linear' para leer el ticket {ticket_id}.
+    Extrae la descripción exacta y los criterios de aceptación.
+  expected_output: >
+    Un resumen de texto claro sobre lo que hay que construir.
+  agent: analyst
+
+architecture_task:
+  description: >
+    Tu deber es crear los planos técnicos completos.
+    
+    ¡ALERTA CRÍTICA DE FORMATO JSON!: Cuando uses 'Escribir Archivo en Raiz', 
+    el Action Input debe ser un objeto JSON puro (escapa saltos de línea con \n).
+    
+    PASO 1: Usa 'Leer Archivo en Raiz' para abrir '../CONTEXT.md'.
+    PASO 2: Usa 'Ejecutar OpenSpec' con: new change "dev-5"
+    PASO 3: Usa 'Escribir Archivo en Raiz' para: openspec/changes/dev-5/proposal.md
+    PASO 4: Usa 'Escribir Archivo en Raiz' para: openspec/changes/dev-5/design.md
+    PASO 5: Usa 'Escribir Archivo en Raiz' para: openspec/changes/dev-5/specs/monorepo/spec.md 
+            (Debe incluir: ## ADDED Requirements, ### Requirement: X, #### Scenario: Y).
+    PASO 6: Usa 'Escribir Archivo en Raiz' para crear: openspec/changes/dev-5/tasks/steps.md
+            Esta lista debe contener cada archivo que el Programador debe crear, 
+            numerado y con una pequeña instrucción.
+  expected_output: >
+    Proposal, Design, Specs y el archivo de tareas (steps.md) creados en el disco.
+  agent: arquitect
+
+coding_task:
+  description: >
+    PASO 1: Usa 'Leer Archivo en Raiz' para leer 'openspec/changes/dev-5/tasks/steps.md'.
+    PASO 2: Ejecuta las tareas una por una, escribiendo cada archivo con 'Escribir Archivo en Raiz'.
+    Si el archivo es un JSON (ej: package.json), asegúrate de escapar las comillas internas y saltos de línea.
+  expected_output: >
+    Todos los archivos de código creados siguiendo el orden del archivo steps.md.
+  agent: programer
+
+review_task:
+  description: >
+    Revisa que todos los archivos listados en 'openspec/changes/dev-5/tasks/steps.md' 
+    existan físicamente y que el diseño se haya cumplido.
+    
+    Si todo está correcto, usa 'Ejecutar OpenSpec' con: archive dev-5
+  expected_output: >
+    Resultado de la validación y confirmación del archivado.
+  agent: reviewer
+
+coding_task:
+  description: >
+    Usa 'Leer Archivo en Raiz' para revisar el diseño. Escribe el código requerido.
+    
+    ¡ALERTA CRÍTICA DE FORMATO JSON!: Tu 'Action Input' DEBE ser un ÚNICO objeto JSON válido. 
+    Escapa TODOS los saltos de línea en el código con \n y las comillas dobles internas con \".
+    
+    Usa 'Escribir Archivo en Raiz' para guardar CADA UNO de los archivos de código nuevos.
+  expected_output: >
+    Todos los archivos de código guardados en la raíz del repositorio.
+  agent: programer
+
+review_task:
+  description: >
+    Como Revisor, DEBES usar la herramienta 'Ejecutar OpenSpec'.
+    Pásale exactamente este comando: archive dev-5
+  expected_output: >
+    El texto real que devuelva la terminal confirmando el archivado.
+  agent: reviewer
