@@ -2,15 +2,16 @@
 name = "crew"
 version = "0.1.0"
 description = "crew using crewAI"
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "Juan Mendoza", email = "juanmb86@gmail.com" }]
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "crewai[tools]==1.15.16",
-    "python-dotenv"
+    "python-dotenv",
+    "requests",
 ]
 
 [project.scripts]
-koty_app_crew = "crew.main:run"
+crew = "crew.main:run"
 run_crew = "crew.main:run"
 
 [build-system]

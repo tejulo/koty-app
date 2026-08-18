@@ -1,74 +1,308 @@
 analysis_task:
   description: >
-    Usa tu herramienta 'Buscar Tarea en Linear' para leer el ticket {ticket_id}.
-    Extrae la descripción exacta y los criterios de aceptación.
+    Usa obligatoriamente 'Buscar Tarea en Linear'
+    para obtener el ticket '{ticket_id}'.
+
+    Analiza:
+    - título;
+    - descripción;
+    - objetivo;
+    - alcance;
+    - requisitos funcionales;
+    - criterios de aceptación;
+    - restricciones;
+    - dependencias;
+    - ambigüedades.
+
+    No inventes requisitos, reglas de negocio ni criterios
+    que no estén presentes en Linear.
+
+    Si algo es ambiguo o contradictorio, indícalo.
+
+    IMPORTANTE:
+    Tu respuesta final debe ser CONCISA.
+    No repitas innecesariamente toda la descripción del ticket.
+    Resume solo la información necesaria para el Arquitecto.
+
   expected_output: >
-    Un resumen de texto claro sobre lo que hay que construir.
+    Resumen estructurado y conciso del ticket '{ticket_id}'
+    con objetivo, alcance, requisitos, criterios de aceptación,
+    restricciones y ambigüedades.
+
   agent: analyst
 
-analysis_task:
-  description: >
-    Usa tu herramienta 'Buscar Tarea en Linear' para leer el ticket {ticket_id}.
-    Extrae la descripción exacta y los criterios de aceptación.
-  expected_output: >
-    Un resumen de texto claro sobre lo que hay que construir.
-  agent: analyst
 
 architecture_task:
   description: >
-    Tu deber es crear los planos técnicos completos.
-    
-    ¡ALERTA CRÍTICA DE FORMATO JSON!: Cuando uses 'Escribir Archivo en Raiz', 
-    el Action Input debe ser un objeto JSON puro (escapa saltos de línea con \n).
-    
-    PASO 1: Usa 'Leer Archivo en Raiz' para abrir '../CONTEXT.md'.
-    PASO 2: Usa 'Ejecutar OpenSpec' con: new change "dev-5"
-    PASO 3: Usa 'Escribir Archivo en Raiz' para: openspec/changes/dev-5/proposal.md
-    PASO 4: Usa 'Escribir Archivo en Raiz' para: openspec/changes/dev-5/design.md
-    PASO 5: Usa 'Escribir Archivo en Raiz' para: openspec/changes/dev-5/specs/monorepo/spec.md 
-            (Debe incluir: ## ADDED Requirements, ### Requirement: X, #### Scenario: Y).
-    PASO 6: Usa 'Escribir Archivo en Raiz' para crear: openspec/changes/dev-5/tasks/steps.md
-            Esta lista debe contener cada archivo que el Programador debe crear, 
-            numerado y con una pequeña instrucción.
+    Convierte el ticket '{ticket_id}' en el cambio OpenSpec
+    '{change_id}'.
+
+    PASO 1:
+    Lee 'CONTEXT.md' usando 'Leer Archivo en Raiz'.
+
+    PASO 2:
+    Si necesitas inspeccionar el repositorio usa
+    'Listar Archivos en Raiz'.
+
+    NO inspecciones directorios generados como:
+    .venv, node_modules, .git, .next, dist, build
+    o __pycache__.
+
+    Si necesitas listar la raíz usa:
+    ruta_relativa="."
+    profundidad_maxima=2
+
+    Después inspecciona únicamente carpetas directamente
+    relacionadas con el ticket.
+
+    PASO 3:
+    Usa 'Ejecutar OpenSpec' con:
+
+    new change {change_id}
+
+    Si el cambio ya existe, continúa trabajando sobre él.
+
+    PASO 4:
+    Crea mediante 'Escribir Archivo en Raiz':
+
+    openspec/changes/{change_id}/proposal.md
+
+    Debe definir:
+    - problema;
+    - objetivo;
+    - alcance;
+    - fuera de alcance;
+    - impacto esperado.
+
+    PASO 5:
+    Crea las specs necesarias dentro de:
+
+    openspec/changes/{change_id}/specs/
+
+    Organízalas por dominio o capability.
+
+    Deben representar todos los requisitos y criterios
+    de aceptación relevantes.
+
+    Los requisitos agregados deben usar el formato:
+
+    ## ADDED Requirements
+
+    ### Requirement: Nombre
+
+    Descripción verificable.
+
+    #### Scenario: Nombre
+
+    - GIVEN ...
+    - WHEN ...
+    - THEN ...
+
+    PASO 6:
+    Crea:
+
+    openspec/changes/{change_id}/design.md
+
+    Debe describir solamente las decisiones técnicas
+    necesarias para implementar las specs.
+
+    PASO 7:
+    Crea:
+
+    openspec/changes/{change_id}/tasks.md
+
+    Usa checkboxes Markdown.
+
+    Cada tarea debe indicar:
+    - archivo a crear o modificar;
+    - cambio concreto;
+    - tests necesarios cuando corresponda.
+
+    PASO 8:
+    Valida el cambio usando 'Ejecutar OpenSpec':
+
+    validate {change_id} --strict --no-interactive
+
+    Si falla, corrige los artifacts y vuelve a validar.
+
+    IMPORTANTE:
+    No devuelvas el contenido completo de proposal, specs,
+    design o tasks en tu respuesta final.
+
+    Esos documentos ya están guardados en disco.
+
+    Tu respuesta final debe contener únicamente:
+    - archivos creados;
+    - resultado de OpenSpec validate;
+    - problemas encontrados, si existen.
+
   expected_output: >
-    Proposal, Design, Specs y el archivo de tareas (steps.md) creados en el disco.
+    Resumen breve indicando los artifacts creados para
+    '{change_id}' y el resultado de OpenSpec validate.
+    No debe repetir el contenido completo de los artifacts.
+
   agent: arquitect
 
-coding_task:
-  description: >
-    PASO 1: Usa 'Leer Archivo en Raiz' para leer 'openspec/changes/dev-5/tasks/steps.md'.
-    PASO 2: Ejecuta las tareas una por una, escribiendo cada archivo con 'Escribir Archivo en Raiz'.
-    Si el archivo es un JSON (ej: package.json), asegúrate de escapar las comillas internas y saltos de línea.
-  expected_output: >
-    Todos los archivos de código creados siguiendo el orden del archivo steps.md.
-  agent: programer
-
-review_task:
-  description: >
-    Revisa que todos los archivos listados en 'openspec/changes/dev-5/tasks/steps.md' 
-    existan físicamente y que el diseño se haya cumplido.
-    
-    Si todo está correcto, usa 'Ejecutar OpenSpec' con: archive dev-5
-  expected_output: >
-    Resultado de la validación y confirmación del archivado.
-  agent: reviewer
 
 coding_task:
   description: >
-    Usa 'Leer Archivo en Raiz' para revisar el diseño. Escribe el código requerido.
-    
-    ¡ALERTA CRÍTICA DE FORMATO JSON!: Tu 'Action Input' DEBE ser un ÚNICO objeto JSON válido. 
-    Escapa TODOS los saltos de línea en el código con \n y las comillas dobles internas con \".
-    
-    Usa 'Escribir Archivo en Raiz' para guardar CADA UNO de los archivos de código nuevos.
+    Implementa el cambio OpenSpec '{change_id}'.
+
+    PASO 1:
+    Lee:
+
+    openspec/changes/{change_id}/proposal.md
+
+    openspec/changes/{change_id}/design.md
+
+    openspec/changes/{change_id}/tasks.md
+
+    PASO 2:
+    Usa 'Listar Archivos en Raiz' únicamente sobre:
+
+    openspec/changes/{change_id}/specs
+
+    y lee cada spec encontrada.
+
+    PASO 3:
+    Interpreta:
+
+    proposal = alcance
+
+    specs = contrato funcional
+
+    design = decisiones técnicas
+
+    tasks = checklist de implementación
+
+    PASO 4:
+    Ejecuta las tareas de tasks.md en orden.
+
+    Antes de modificar un archivo existente debes leerlo
+    con 'Leer Archivo en Raiz'.
+
+    Usa 'Escribir Archivo en Raiz' para crear o modificar
+    archivos.
+
+    PASO 5:
+    Después de completar correctamente cada tarea,
+    actualiza su checkbox en tasks.md:
+
+    - [ ] -> - [x]
+
+    PASO 6:
+    No inspecciones:
+    .venv, node_modules, .git, .next, dist, build
+    ni __pycache__.
+
+    No listes todo el repositorio salvo que sea estrictamente
+    necesario.
+
+    PASO 7:
+    Al finalizar ejecuta mediante 'Ejecutar Verificacion':
+
+    python
+
+    lint
+
+    test
+
+    build
+
+    Si una verificación falla, corrige el problema y vuelve
+    a ejecutar la verificación correspondiente.
+
+    IMPORTANTE:
+    Tu respuesta final debe ser breve.
+
+    NO pegues el código implementado.
+
+    Devuelve únicamente:
+    - archivos creados o modificados;
+    - tareas completadas;
+    - resultado de las verificaciones.
+
   expected_output: >
-    Todos los archivos de código guardados en la raíz del repositorio.
+    Resumen breve de los archivos implementados,
+    tareas completadas y resultados de python, lint,
+    test y build.
+
   agent: programer
+
 
 review_task:
   description: >
-    Como Revisor, DEBES usar la herramienta 'Ejecutar OpenSpec'.
-    Pásale exactamente este comando: archive dev-5
+    Realiza la revisión final del cambio '{change_id}'.
+
+    PASO 1:
+    Lee:
+
+    openspec/changes/{change_id}/proposal.md
+
+    openspec/changes/{change_id}/design.md
+
+    openspec/changes/{change_id}/tasks.md
+
+    PASO 2:
+    Lista únicamente:
+
+    openspec/changes/{change_id}/specs
+
+    y lee cada spec encontrada.
+
+    PASO 3:
+    Comprueba que:
+    - todos los Requirements estén implementados;
+    - todos los Scenarios estén cubiertos;
+    - design se respete;
+    - todas las tasks estén marcadas [x].
+
+    Lee únicamente los archivos de código relevantes para
+    comprobar estas condiciones.
+
+    NO listes todo el repositorio.
+
+    NO inspecciones:
+    .venv, node_modules, .git, .next, dist, build
+    ni __pycache__.
+
+    PASO 4:
+    Ejecuta mediante 'Ejecutar Verificacion':
+
+    python
+
+    lint
+
+    test
+
+    build
+
+    Si cualquiera falla, NO archives el cambio.
+
+    PASO 5:
+    Ejecuta mediante 'Ejecutar OpenSpec':
+
+    validate {change_id} --strict --no-interactive
+
+    Si falla, NO archives.
+
+    PASO 6:
+    SOLO si todo es correcto ejecuta:
+
+    archive {change_id} --yes
+
+    PASO 7:
+    Nunca inventes una confirmación de archivado.
+    Usa el resultado real devuelto por OpenSpec.
+
+    IMPORTANTE:
+    Tu respuesta final debe ser breve.
+
+    No pegues archivos completos ni logs extensos.
+
   expected_output: >
-    El texto real que devuelva la terminal confirmando el archivado.
+    Informe breve indicando si la revisión fue aprobada
+    o rechazada. Si fue aprobada, incluye el resultado
+    real del archivado OpenSpec.
+
   agent: reviewer
