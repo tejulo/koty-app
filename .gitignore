@@ -1,15 +1,12 @@
 # Dependencies
 node_modules/
-koty-app/
-.pnpm-store/
 
 # Build outputs
 dist/
 .next/
 out/
-.turbo/
 
-# Environment
+# Environment variables
 .env
 .env.local
 .env.*.local
@@ -26,12 +23,15 @@ Thumbs.db
 
 # Debug
 npm-debug.log*
-pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# TypeScript
-*.tsbuildinfo
+pnpm-debug.log*
 
 # Testing
 coverage/
+
+# Misc
+*.tsbuildinfo
+
+# Prisma
+apps/api/prisma/migrations/**/migration_lock.toml

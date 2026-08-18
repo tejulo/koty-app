@@ -4,10 +4,7 @@ import os
 
 from crewai import Agent, Crew, LLM, Process, Task
 from crewai.project import CrewBase, agent, crew, task
-from .tools.custom_tool import buscar_tarea_linear, ejecutar_openspec, escribir_archivo_raiz
-from crewai_tools import FileReadTool
-
-herramienta_leer = FileReadTool()
+from .tools.custom_tool import buscar_tarea_linear, ejecutar_openspec, escribir_archivo_raiz, leer_archivo_raiz
 
 DEFAULT_ZEN_BASE_URL = "https://opencode.ai/zen/go/v1"
 
@@ -45,9 +42,9 @@ class KotyAppCrew:
             config=self.agents_config['arquitect'],
             verbose=True,
             allow_delegation=False,
+            max_iter=25, # Aumentamos el límite de acciones
             llm=_zen_llm("ZEN_MANAGER_MODEL"),
-            # Ahora el arquitecto puede leer el contexto y escribir las especificaciones
-            tools=[herramienta_leer, ejecutar_openspec, escribir_archivo_raiz]
+            tools=[leer_archivo_raiz, ejecutar_openspec, escribir_archivo_raiz]
         )
 
     @agent
@@ -57,7 +54,8 @@ class KotyAppCrew:
             llm=_zen_llm("ZEN_CODER_MODEL"),
             verbose=True,
             allow_delegation=False,
-            tools=[herramienta_leer, escribir_archivo_raiz]
+            max_iter=50, # Le damos 50 intentos para que pueda crear todos los archivos del monorepo
+            tools=[leer_archivo_raiz, escribir_archivo_raiz]
         )
 
     @agent
@@ -67,7 +65,7 @@ class KotyAppCrew:
             llm=_zen_llm("ZEN_REVIEWER_MODEL"),
             verbose=True,
             allow_delegation=False,
-            tools=[herramienta_leer, ejecutar_openspec]
+            tools=[leer_archivo_raiz, ejecutar_openspec]
         )
 
     @task

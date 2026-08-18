@@ -8,38 +8,52 @@ analysis_task:
 
 architecture_task:
   description: >
-    Tu deber es crear los planos técnicos respetando las reglas globales.
+    Tu deber es crear los planos técnicos respetando estrictamente el formato.
     
-    PASO 1: Usa tu herramienta de lectura para abrir el archivo '../CONTEXT.md'. 
-    IMPORTANTE: No intentes memorizar todo el texto. Extrae y resume ÚNICAMENTE 
-    las reglas clave de arquitectura, tecnologías permitidas y convenciones de código.
+    ¡ALERTA CRÍTICA DE FORMATO JSON!: Cuando uses la herramienta 'Escribir Archivo en Raiz', 
+    tu 'Action Input' DEBE ser un ÚNICO objeto JSON válido. Escapa saltos de línea con \n.
     
-    PASO 2: Usa la herramienta 'Ejecutar OpenSpec' pasándole: new change "{ticket_id}"
-    Presta atención al nombre exacto de la carpeta que la terminal te devuelva.
+    PASO 1: Usa 'Leer Archivo en Raiz' para abrir '../CONTEXT.md' y extraer las reglas.
     
-    PASO 3: Usa la herramienta 'Escribir Archivo en Raiz' para rellenar 'openspec/changes/<carpeta-del-cambio>/proposal.md' y 'design.md' con información técnica basada en las reglas que resumiste.
+    PASO 2: Usa 'Ejecutar OpenSpec' con este comando exacto: new change "dev-5"
     
-    PASO 4: Usa la herramienta 'Escribir Archivo en Raiz' para crear las especificaciones dentro de 'openspec/changes/<carpeta-del-cambio>/specs/<nombre-capacidad>/spec.md'.
-    Asegúrate de incluir los encabezados de requisitos (ej. ## ADDED Requirements) y los escenarios con cuatro almohadillas (#### Scenario:).
+    PASO 3: Usa 'Escribir Archivo en Raiz' para rellenar openspec/changes/dev-5/proposal.md
+    DEBES USAR ESTE FORMATO EXACTO Y NO OTRO:
+    ## Why
+    (Escribe aquí por qué se hace este cambio)
+    ## What Changes
+    (Escribe aquí qué va a cambiar)
+    
+    PASO 4: Usa 'Escribir Archivo en Raiz' para rellenar openspec/changes/dev-5/design.md
+    
+    PASO 5: Usa 'Escribir Archivo en Raiz' para crear openspec/changes/dev-5/specs/monorepo/spec.md
+    DEBES USAR ESTE FORMATO EXACTO Y NO OTRO:
+    ## ADDED Requirements
+    ### Requirement: Inicializacion del Monorepo
+    El sistema MUST inicializar el monorepo.
+    #### Scenario: Creacion exitosa
+    - WHEN se ejecuta el comando
+    - THEN se crean los archivos
   expected_output: >
-    Documentos de propuesta, diseño y specs detallados, guardados correctamente respetando las reglas clave del CONTEXT.md.
+    Archivos creados con el formato Markdown estrictamente válido para OpenSpec, incluyendo la palabra MUST.
   agent: arquitect
 
 coding_task:
   description: >
-    Lee los documentos de diseño y especificaciones que acaba de crear el Arquitecto.
-    Escribe el código requerido.
-    Usa tu herramienta 'Escribir Archivo en Raiz' para guardar CADA UNO de los archivos de código nuevos.
-    Solo pasa la ruta interna de la aplicación (ejemplo: 'apps/web/package.json') y el código.
+    Usa 'Leer Archivo en Raiz' para revisar el diseño. Escribe el código requerido.
+    
+    ¡ALERTA CRÍTICA DE FORMATO JSON!: Tu 'Action Input' DEBE ser un ÚNICO objeto JSON válido. 
+    Escapa TODOS los saltos de línea en el código con \n y las comillas dobles internas con \".
+    
+    Usa 'Escribir Archivo en Raiz' para guardar CADA UNO de los archivos de código nuevos.
   expected_output: >
-    Todos los archivos de código guardados físicamente en la raíz del repositorio.
+    Todos los archivos de código guardados en la raíz del repositorio.
   agent: programer
 
 review_task:
   description: >
-    Revisa el código escrito por el Programador y compáralo con el diseño y las especificaciones.
-    Si todo está correcto, usa tu herramienta 'Ejecutar OpenSpec' 
-    para archivar el cambio ejecutando el comando: archive <nombre-de-la-carpeta-de-cambio>
+    Como Revisor, DEBES usar la herramienta 'Ejecutar OpenSpec'.
+    Pásale exactamente este comando: archive dev-5
   expected_output: >
-    Confirmación de que el código ha sido revisado y el cambio archivado exitosamente.
+    El texto real que devuelva la terminal confirmando el archivado.
   agent: reviewer
