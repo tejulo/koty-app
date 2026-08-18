@@ -35,3 +35,16 @@ coverage/
 
 # Prisma
 apps/api/prisma/migrations/**/migration_lock.toml
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# uv / Python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
