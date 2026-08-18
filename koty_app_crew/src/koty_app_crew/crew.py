@@ -43,7 +43,7 @@ class KotyAppCrew:
             verbose=True,
             allow_delegation=False,
             max_iter=25, # Aumentamos el límite de acciones
-            llm=_zen_llm("ZEN_MANAGER_MODEL"),
+            llm=_zen_llm("ZEN_ARCHITECT_MODEL"),
             tools=[leer_archivo_raiz, ejecutar_openspec, escribir_archivo_raiz]
         )
 
