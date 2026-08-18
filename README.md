@@ -1,576 +1,224 @@
 # PLAN-DEPTO
 
-Sistema de administración de alquileres desarrollado como monorepo.
+PLAN-DEPTO es un sistema SaaS de administracion de alquileres para el mercado paraguayo. Este repositorio contiene el scaffolding inicial del monorepo y las herramientas auxiliares de especificacion y automatizacion.
 
-El proyecto incluye:
+La especificacion funcional y tecnica del producto esta en [`CONTEXT.md`](./CONTEXT.md). Ese documento describe el objetivo de V1 y sus incrementos; no representa funcionalidades ya implementadas.
 
-* Frontend con Next.js
-* API REST con NestJS
-* Worker para tareas en segundo plano
-* Paquetes compartidos
-* PostgreSQL
-* CrewAI para automatización mediante agentes
-* OpenSpec para planificación y especificación de cambios
+## Estado Actual
 
----
+El repositorio se encuentra antes de la implementacion funcional del incremento 0.
+
+| Componente | Estado actual |
+| --- | --- |
+| Web | Next.js 14 con App Router, Tailwind CSS y una pagina inicial estatica. |
+| API | NestJS 10 con `GET /` y `GET /health`; aun sin prefijo `/api/v1`, OpenAPI ni modulos de dominio. |
+| Worker | Scaffolding TypeScript; el bootstrap existe, pero los scripts actuales no lo ejecutan. |
+| Contratos compartidos | Tipos TypeScript basicos; todavia no contiene esquemas Zod. |
+| Configuracion compartida | Presets de TypeScript y ESLint. |
+| Persistencia | PostgreSQL, Prisma, migraciones y Docker Compose todavia no estan incorporados. |
+| Pruebas | No hay suite ni script `pnpm test` configurados. |
+
+Autenticacion, organizaciones, permisos, auditoria, outbox, jobs persistentes y el resto del dominio forman parte de los incrementos definidos en `CONTEXT.md`.
+
+## Estructura
+
+```text
+koty-app/
+├── apps/
+│   ├── web/               # Next.js
+│   ├── api/               # NestJS
+│   └── worker/            # Worker TypeScript
+├── packages/
+│   ├── contracts/         # Tipos compartidos
+│   └── config/            # TypeScript y ESLint
+├── crewai/                # Automatizacion con agentes
+├── openspec/              # Especificaciones y cambios
+├── docs/                  # Documentacion adicional
+├── CONTEXT.md             # Especificacion integral del producto
+├── CONTRIBUTING.md        # Guia de contribucion
+├── package.json
+├── pnpm-lock.yaml
+└── pnpm-workspace.yaml
+```
+
+El workspace se administra directamente con pnpm; no utiliza Turborepo.
 
 ## Requisitos
 
-Antes de comenzar, asegúrate de tener instalados:
+- Node.js `>=20.11.0`
+- pnpm `>=8.15.0`
+- Python `>=3.10` y `<3.14`, solo para CrewAI
+- [uv](https://docs.astral.sh/uv/), solo para CrewAI
+- OpenSpec CLI, para trabajar con especificaciones
 
-* Node.js 20.11.0 o superior
-* pnpm 8.15.0 o superior
-* Docker
-* Python >= 3.10 y < 3.14
-* uv
-* OpenSpec CLI
+Las versiones de dependencias del proyecto quedan fijadas en `pnpm-lock.yaml` y `crewai/uv.lock`.
 
-### Instalar pnpm
+### pnpm
+
+Con Node.js 20 puede habilitarse pnpm mediante Corepack:
 
 ```bash
-npm install -g pnpm@8.15.0
+corepack enable pnpm
+pnpm --version
 ```
 
-### Instalar uv
+La documentacion oficial de pnpm confirma el uso de `--filter` para seleccionar paquetes del workspace. Los nombres validos de este repositorio usan el scope `@koty-app/*`.
 
-Linux/macOS:
+### uv
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Verificar:
-
-```bash
 uv --version
 ```
 
-### Instalar OpenSpec
+### OpenSpec
 
 ```bash
 npm install -g @fission-ai/openspec@latest
-```
-
-Verificar:
-
-```bash
 openspec --version
 ```
 
----
+## Instalacion
 
-# Setup del proyecto
-
-## 1. Clonar el repositorio
-
-```bash
-git clone <URL_DEL_REPOSITORIO>
-cd koty-app
-```
-
----
-
-## 2. Instalar dependencias Node.js
+Desde la raiz del repositorio:
 
 ```bash
 pnpm install
 ```
 
-Esto instala las dependencias de las aplicaciones y paquetes del monorepo.
+Actualmente el archivo `.env.example` de la raiz documenta variables previstas, pero las aplicaciones Node no cargan de forma uniforme un `.env.local` raiz. En particular, la API necesita recibir `PORT` desde el entorno para no competir con la web por el puerto 3000.
 
----
+## Desarrollo Local
 
-## 3. Iniciar PostgreSQL
-
-```bash
-pnpm db:start
-```
-
-Para detener PostgreSQL:
+### Web
 
 ```bash
-pnpm db:stop
+pnpm --filter @koty-app/web dev
 ```
 
----
+Disponible por defecto en `http://localhost:3000`.
 
-## 4. Configurar variables de entorno del monorepo
-
-Desde la raíz:
+### API
 
 ```bash
-cp .env.example .env.local
+PORT=3001 pnpm --filter @koty-app/api dev
 ```
 
-Completa las variables requeridas antes de iniciar los servicios.
+Disponible en:
 
----
+- `http://localhost:3001/`
+- `http://localhost:3001/health`
 
-## 5. Arrancar los servicios
+### Worker
 
-### Todos los servicios
+El worker no expone HTTP. Sus scripts `dev` y `start` apuntan actualmente a `src/index.ts` y `dist/index.js`, que solo exportan la clase y no ejecutan el bootstrap de `src/main.ts`. Por eso no debe considerarse operativo hasta corregir sus entrypoints.
+
+### Todos los paquetes
+
+El script raiz existe:
 
 ```bash
 pnpm dev
 ```
 
-### Servicios individuales
+Ejecuta en paralelo todos los scripts `dev` del workspace. En el estado actual no es el flujo recomendado porque web y API intentan usar el puerto 3000 si `PORT` no se exporta, y el worker no inicia su bootstrap.
 
-Frontend:
+## Scripts Node
 
-```bash
-pnpm --filter @plandepo/web dev
-```
+Los siguientes scripts existen en el `package.json` raiz:
 
-Disponible en:
+| Comando | Descripcion |
+| --- | --- |
+| `pnpm dev` | Ejecuta los scripts `dev` del workspace en paralelo. |
+| `pnpm build` | Compila recursivamente los paquetes que definen `build`. |
+| `pnpm lint` | Ejecuta lint recursivamente; API y worker aplican `--fix`. |
+| `pnpm clean` | Elimina artefactos generados mediante los scripts de cada paquete. |
+| `pnpm start:web` | Inicia un build previo de Next.js. |
+| `pnpm start:api` | Inicia el artefacto compilado de la API. |
+| `pnpm start:worker` | Script presente, pero bloqueado por el entrypoint descrito arriba. |
 
-```text
-http://localhost:3000
-```
+No existen todavia los scripts `test`, `format`, `db:start` ni `db:stop`.
 
-API:
+## Paquetes Compartidos
 
-```bash
-pnpm --filter @plandepo/api dev
-```
+### `@koty-app/contracts`
 
-Disponible en:
+Contiene por ahora tipos TypeScript basicos para respuestas API, paginacion y estado de salud. Los esquemas Zod compartidos se incorporaran cuando los limites de API los necesiten.
 
-```text
-http://localhost:3001
-```
+### `@koty-app/config`
 
-Worker:
+Exporta configuraciones compartidas de TypeScript y ESLint. Tailwind CSS permanece configurado dentro de `apps/web`.
 
-```bash
-pnpm --filter @plandepo/worker dev
-```
+## CrewAI
 
-El worker ejecuta tareas en segundo plano y no expone un servidor HTTP.
-
----
-
-# CrewAI
-
-El proyecto incluye un subproyecto Python con CrewAI:
-
-```text
-crewai/
-├── pyproject.toml
-├── uv.lock
-└── src/
-    └── crew/
-```
-
-Las dependencias Python son administradas con `uv`.
-
-No se utiliza `pip install` manualmente ni se versiona el entorno virtual.
-
----
-
-## 1. Entrar al proyecto CrewAI
-
-Desde la raíz del repositorio:
+El subproyecto `crewai/` automatiza analisis, planificacion, implementacion y revision de cambios mediante agentes. Sus dependencias se administran exclusivamente con `uv`.
 
 ```bash
 cd crewai
-```
-
----
-
-## 2. Instalar las dependencias
-
-```bash
 uv sync --frozen
-```
-
-Esto:
-
-* crea automáticamente `crewai/.venv`
-* instala las dependencias definidas en `pyproject.toml`
-* utiliza las versiones fijadas en `uv.lock`
-* instala el proyecto Python en el entorno virtual
-
-Durante desarrollo también puede utilizarse:
-
-```bash
-uv sync
-```
-
----
-
-## 3. Configurar variables de entorno de CrewAI
-
-Si existe un archivo de ejemplo:
-
-```bash
 cp .env.example .env
 ```
 
-Completa las claves necesarias según el proveedor de LLM utilizado.
+Configura en `crewai/.env` las claves y modelos requeridos por el archivo de ejemplo:
 
-Por ejemplo:
+- `LINEAR_API_KEY`
+- `OPENCODE_API_KEY`
+- `ZEN_BASE_URL`
+- `ZEN_ANALYST_MODEL`
+- `ZEN_ARCHITECT_MODEL`
+- `ZEN_CODER_MODEL`
+- `ZEN_REVIEWER_MODEL`
 
-```env
-LLM_PROVIDER=opencode
-OPENCODE_API_KEY=
-```
-
-o, si se utiliza Ollama local:
-
-```env
-LLM_PROVIDER=ollama
-OLLAMA_BASE_URL=http://localhost:11434/v1
-```
-
-El archivo `.env` no debe subirse al repositorio.
-
----
-
-## 4. Ejecutar CrewAI
-
-No es necesario activar manualmente el entorno virtual.
-
-Con `uv` se recomienda ejecutar:
+Ejecutar un ticket:
 
 ```bash
 uv run run_crew DEV-5
 ```
 
-También puede ejecutarse directamente el archivo principal:
+Alternativamente:
 
 ```bash
 uv run python src/crew/main.py DEV-5
 ```
 
-Donde:
-
-```text
-DEV-5
-```
-
-es el identificador del cambio o tarea que procesará el Crew.
-
----
-
-## Activar manualmente el entorno virtual
-
-Normalmente no es necesario, pero puede hacerse con:
-
-```bash
-source .venv/bin/activate
-```
-
-Para salir:
-
-```bash
-deactivate
-```
-
----
-
-## Agregar una dependencia Python
-
-No usar:
-
-```bash
-pip install <paquete>
-```
-
-Usar:
+No es necesario activar manualmente `crewai/.venv`. Para agregar o eliminar dependencias:
 
 ```bash
 uv add <paquete>
+uv remove <paquete>
 ```
 
-Ejemplo:
+Consulta [`crewai/README.md`](./crewai/README.md) para detalles del flujo.
 
-```bash
-uv add python-dotenv
-```
+## OpenSpec
 
-Esto actualiza:
+OpenSpec mantiene las especificaciones actuales en `openspec/specs/` y el historial de cambios en `openspec/changes/`. El repositorio ya esta inicializado; no ejecutes `openspec init` nuevamente.
 
-```text
-pyproject.toml
-uv.lock
-```
-
----
-
-# OpenSpec
-
-OpenSpec se utiliza para mantener las especificaciones y planes técnicos de los cambios del proyecto.
-
-La estructura se encuentra en la raíz:
-
-```text
-openspec/
-├── specs/
-└── changes/
-```
-
-El repositorio ya contiene la configuración de OpenSpec, por lo que después de clonar el proyecto **no debe ejecutarse nuevamente**:
-
-```bash
-openspec init
-```
-
-Para comprobar que OpenSpec reconoce correctamente el proyecto:
-
-```bash
-cd koty-app
-openspec list
-```
-
-OpenSpec debe ejecutarse desde la raíz del repositorio, donde se encuentra:
-
-```text
-openspec/
-```
-
----
-
-## Flujo básico de OpenSpec
-
-Consultar cambios:
+Comandos utiles desde la raiz:
 
 ```bash
 openspec list
+openspec list --specs
+openspec show my-change
+openspec status --change my-change
+openspec validate --all --strict
 ```
 
-Consultar un cambio:
+Los identificadores de cambios activos usan kebab-case en minusculas. `DEV-5` ya esta archivado en `openspec/changes/archive/2026-08-18-dev-5/`, por lo que no aparece como cambio activo.
 
-```bash
-openspec show DEV-5
-```
+## Limitaciones Conocidas
 
-Validar un cambio:
+- El codigo presente es scaffolding y no implementa todavia el incremento 0.
+- No hay PostgreSQL local, Prisma, migraciones ni Docker Compose.
+- `pnpm test`, `pnpm format`, `pnpm db:start` y `pnpm db:stop` no existen.
+- El worker no ejecuta su bootstrap mediante sus scripts actuales.
+- La estrategia de variables de entorno Node aun no esta unificada.
+- Los comandos `start` de produccion requieren revision antes de usarse para despliegue.
 
-```bash
-openspec validate DEV-5
-```
+## Contribucion
 
-Consultar su estado:
+Antes de abrir un cambio, consulta [`CONTRIBUTING.md`](./CONTRIBUTING.md), `CONTEXT.md` y las especificaciones OpenSpec aplicables. No declares pruebas ejecutadas si el comando correspondiente no existe o no ejecuto una suite real.
 
-```bash
-openspec status --change DEV-5
-```
+## Licencia
 
-El CrewAI también puede ejecutar comandos de OpenSpec automáticamente durante sus procesos de planificación, implementación y revisión.
-
----
-
-# Scripts disponibles
-
-| Comando         | Descripción                        |
-| --------------- | ---------------------------------- |
-| `pnpm dev`      | Arrancar todos los servicios       |
-| `pnpm build`    | Compilar todas las apps y paquetes |
-| `pnpm lint`     | Ejecutar lint en todo el monorepo  |
-| `pnpm test`     | Ejecutar tests                     |
-| `pnpm clean`    | Limpiar artefactos de compilación  |
-| `pnpm format`   | Formatear archivos con Prettier    |
-| `pnpm db:start` | Iniciar PostgreSQL con Docker      |
-| `pnpm db:stop`  | Detener PostgreSQL                 |
-
-### CrewAI
-
-| Comando                                | Descripción                            |
-| -------------------------------------- | -------------------------------------- |
-| `uv sync --frozen`                     | Instalar dependencias usando `uv.lock` |
-| `uv sync`                              | Sincronizar el entorno Python          |
-| `uv add <paquete>`                     | Agregar una dependencia Python         |
-| `uv remove <paquete>`                  | Eliminar una dependencia Python        |
-| `uv run run_crew DEV-5`                | Ejecutar el Crew                       |
-| `uv run python src/crew/main.py DEV-5` | Ejecutar directamente el entrypoint    |
-
----
-
-# Estructura del proyecto
-
-```text
-koty-app/
-├── apps/
-│   ├── web/                  # Next.js - Frontend
-│   ├── api/                  # NestJS - REST API
-│   └── worker/               # NestJS - Background Jobs
-│
-├── packages/
-│   ├── contracts/            # Esquemas Zod compartidos
-│   └── config/               # Configuración compartida
-│
-├── crewai/
-│   ├── pyproject.toml        # Configuración y dependencias Python
-│   ├── uv.lock               # Versiones exactas de dependencias
-│   └── src/
-│       └── crew/
-│           ├── main.py
-│           ├── crew.py
-│           ├── config/
-│           └── tools/
-│
-├── openspec/
-│   ├── specs/                # Especificaciones actuales
-│   └── changes/              # Cambios en planificación/desarrollo
-│
-├── docker-compose.yml
-├── pnpm-workspace.yaml
-├── package.json
-├── turbo.json
-└── README.md
-```
-
----
-
-# Paquetes compartidos
-
-## @plandepo/contracts
-
-Contiene esquemas Zod compartidos entre frontend y backend.
-
-Ejemplo:
-
-```typescript
-import {
-  CreateUserSchema,
-  LoginSchema,
-} from '@plandepo/contracts';
-```
-
----
-
-## @plandepo/config
-
-Contiene configuraciones compartidas para:
-
-* TypeScript
-* ESLint
-* Prettier
-* Tailwind CSS
-
----
-
-# Archivos que no deben versionarse
-
-No deben subirse al repositorio:
-
-```text
-.env
-.env.local
-.venv/
-__pycache__/
-*.pyc
-node_modules/
-.next/
-dist/
-```
-
-En particular, el entorno virtual de Python:
-
-```text
-crewai/.venv/
-```
-
-se genera localmente mediante:
-
-```bash
-uv sync
-```
-
-y nunca debe ser agregado a Git.
-
-Por el contrario, sí deben versionarse:
-
-```text
-crewai/pyproject.toml
-crewai/uv.lock
-crewai/.python-version
-```
-
-si `.python-version` forma parte del proyecto.
-
----
-
-# Setup rápido para nuevos desarrolladores
-
-Después de tener instalados Node.js, pnpm, Docker, Python, uv y OpenSpec:
-
-```bash
-git clone <URL_DEL_REPOSITORIO>
-cd koty-app
-
-pnpm install
-
-cp .env.example .env.local
-
-pnpm db:start
-
-cd crewai
-
-uv sync --frozen
-
-cp .env.example .env
-```
-
-Configura las variables correspondientes y vuelve a la raíz:
-
-```bash
-cd ..
-```
-
-Arranca el monorepo:
-
-```bash
-pnpm dev
-```
-
-Para ejecutar CrewAI:
-
-```bash
-cd crewai
-uv run run_crew DEV-5
-```
-
----
-
-# Contribuir
-
-Crear una rama:
-
-```bash
-git checkout -b feature/mi-feature
-```
-
-Realizar los cambios y revisar:
-
-```bash
-git status
-```
-
-Agregar los archivos:
-
-```bash
-git add .
-```
-
-Crear el commit:
-
-```bash
-git commit -m "feat: agregar nueva feature"
-```
-
-Subir la rama:
-
-```bash
-git push origin feature/mi-feature
-```
-
-Finalmente, crear un Pull Request.
-
----
-
-# Licencia
-
-Privado - PLAN-DEPTO
-
+Privado - PLAN-DEPTO.
