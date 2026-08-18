@@ -6,72 +6,98 @@ from crewai.tools import tool
 @tool("Buscar Tarea en Linear")
 def buscar_tarea_linear(ticket_id: str) -> str:
     """
-    Busca la información de una tarea en Linear usando su identificador (por ejemplo: KOTY-123).
-    Devuelve el título y la descripción para que el agente pueda leerlos.
+    Busca un ticket en Linear por su identificador (ej. DEV-5) y devuelve su título y descripción.
     """
     api_key = os.environ.get("LINEAR_API_KEY")
     if not api_key:
-        return "Error: No se encontró la llave LINEAR_API_KEY en el archivo .env"
-
-    url = "https://api.linear.app/graphql"
-    headers = {
-        "Authorization": api_key,
-        "Content-Type": "application/json"
-    }
+        return "Error: Falta la variable LINEAR_API_KEY en el archivo .env"
     
-    consulta_graphql = """
-    query($id: String!) {
+    query = """
+    query Issue($id: String!) {
       issue(id: $id) {
         title
         description
       }
     }
     """
-    variables = {"id": ticket_id}
+    
+    headers = {
+        "Authorization": api_key,
+        "Content-Type": "application/json"
+    }
     
     try:
-        respuesta = requests.post(url, headers=headers, json={"query": consulta_graphql, "variables": variables})
-        datos = respuesta.json()
+        response = requests.post(
+            "https://api.linear.app/graphql",
+            json={"query": query, "variables": {"id": ticket_id}},
+            headers=headers
+        )
+        data = response.json()
         
-        tarea = datos.get("data", {}).get("issue", {})
-        if not tarea:
-            return f"No pude encontrar la tarea con el identificador: {ticket_id}"
+        if "errors" in data:
+            return f"Error de Linear: {data['errors'][0]['message']}"
             
-        titulo = tarea.get("title", "Sin título")
-        descripcion = tarea.get("description", "Sin descripción")
+        issue = data.get("data", {}).get("issue")
+        if not issue:
+            return f"No se encontró el ticket {ticket_id} en Linear."
+            
+        titulo = issue.get("title", "Sin título")
+        descripcion = issue.get("description", "Sin descripción")
         
         return f"Título de la tarea: {titulo}\nDescripción: {descripcion}"
         
     except Exception as e:
-        return f"Hubo un problema al conectar con internet: {str(e)}"
+        return f"Error al conectar con Linear: {str(e)}"
 
 @tool("Ejecutar OpenSpec")
-def ejecutar_openspec(instrucciones_adicionales: str) -> str:
+def ejecutar_openspec(comando_openspec: str) -> str:
     """
-    Ejecuta el comando de terminal de OpenSpec para generar el plano técnico en la carpeta del proyecto.
-    El agente debe enviar como argumento cualquier instrucción extra si es necesario, o un texto vacío.
+    Ejecuta el programa OpenSpec en la RAÍZ del proyecto.
+    NO uses el comando 'generate'.
+    Debes pasar solo los argumentos válidos, por ejemplo: 'new change "Resumen del ticket"' o 'init'.
     """
     try:
-        # Aseguramos que el comando se ejecute en la raíz de tu proyecto
-        # Subimos un nivel desde la carpeta de la herramienta hasta la raíz de koty-app
-        directorio_raiz = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
+        comando_completo = f"npx openspec {comando_openspec}"
         
-        # El comando que se ejecutará en la terminal real
-        comando = f"npx openspec generate"
-        if instrucciones_adicionales:
-             # Si el arquitecto quiere añadir notas directas a la terminal
-             comando += f' --prompt "{instrucciones_adicionales}"'
-
+        # El timeout=30 cortará el comando si se queda esperando una respuesta
         resultado = subprocess.run(
-            comando,
+            comando_completo,
             shell=True,
-            cwd=directorio_raiz,
+            cwd="..", 
             capture_output=True,
             text=True,
-            check=True # Generará un error si el comando de Node falla
+            timeout=30
         )
-        return f"OpenSpec se ejecutó correctamente.\nSalida de la terminal:\n{resultado.stdout}"
-    except subprocess.CalledProcessError as e:
-        return f"Error al ejecutar OpenSpec en la terminal. Verifica que Node y OpenSpec estén instalados.\nDetalle del error: {e.stderr}"
+        
+        if resultado.returncode == 0:
+            return f"Éxito:\n{resultado.stdout}"
+        else:
+            return f"Error de OpenSpec:\n{resultado.stderr}\n{resultado.stdout}"
+            
+    except subprocess.TimeoutExpired:
+        return "Error: El comando tardó más de 30 segundos y se congeló. OpenSpec probablemente estaba haciendo una pregunta interactiva (como Y/n). Usa otro comando."
     except Exception as e:
-         return f"Error inesperado al intentar usar OpenSpec: {str(e)}"
+        return f"Error crítico: {str(e)}"
+
+
+@tool("Escribir Archivo en Raiz")
+def escribir_archivo_raiz(ruta_relativa: str, contenido: str) -> str:
+    """
+    Escribe un archivo garantizando que se guarde en la RAÍZ del proyecto.
+    Solo debes pasar la ruta del archivo (ej: 'package.json' o 'apps/web/package.json').
+    La herramienta se encarga automáticamente de guardarlo en el lugar correcto.
+    """
+    try:
+        # Forzamos la ruta un nivel arriba automáticamente
+        ruta_completa = os.path.abspath(os.path.join("..", ruta_relativa))
+        
+        # Creamos las carpetas intermedias (como apps/web/) si no existen
+        os.makedirs(os.path.dirname(ruta_completa), exist_ok=True)
+        
+        # Escribimos el archivo
+        with open(ruta_completa, 'w', encoding='utf-8') as f:
+            f.write(contenido)
+            
+        return f"Archivo guardado exitosamente en la raíz: {ruta_completa}"
+    except Exception as e:
+        return f"Error al guardar archivo: {str(e)}"
