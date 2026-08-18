@@ -8,7 +8,7 @@ load_dotenv()
 ruta_src = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, ruta_src)
 
-from koty_app_crew.crew import KotyAppCrew
+from crew.crew import KotyAppCrew
 
 def run():
     """
