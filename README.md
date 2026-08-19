@@ -10,13 +10,13 @@ El repositorio se encuentra antes de la implementacion funcional del incremento 
 
 | Componente | Estado actual |
 | --- | --- |
-| Web | Next.js 14 con App Router, Tailwind CSS y una pagina inicial estatica. |
-| API | NestJS 10 con `GET /` y `GET /health`; aun sin prefijo `/api/v1`, OpenAPI ni modulos de dominio. |
-| Worker | Scaffolding TypeScript; el bootstrap existe, pero los scripts actuales no lo ejecutan. |
+| Web | Next.js 16 con App Router, Tailwind CSS y una pagina inicial estatica. |
+| API | NestJS 11 con `GET /` y `GET /health`; aun sin prefijo `/api/v1`, OpenAPI ni modulos de dominio. |
+| Worker | Scaffolding TypeScript con entrypoint ejecutable y cierre controlado por senales. |
 | Contratos compartidos | Tipos TypeScript basicos; todavia no contiene esquemas Zod. |
 | Configuracion compartida | Presets de TypeScript y ESLint. |
 | Persistencia | PostgreSQL, Prisma, migraciones y Docker Compose todavia no estan incorporados. |
-| Pruebas | No hay suite ni script `pnpm test` configurados. |
+| Pruebas | Vitest, pruebas shell del bootstrap, pytest y validacion estricta de OpenSpec integrados en `pnpm verify`. |
 
 Autenticacion, organizaciones, permisos, auditoria, outbox, jobs persistentes y el resto del dominio forman parte de los incrementos definidos en `CONTEXT.md`.
 
@@ -45,46 +45,44 @@ El workspace se administra directamente con pnpm; no utiliza Turborepo.
 
 ## Requisitos
 
-- Node.js `>=20.11.0`
+- Node.js `>=20.19.0`
 - pnpm `>=8.15.0`
 - Python `>=3.10` y `<3.14`, solo para CrewAI
 - [uv](https://docs.astral.sh/uv/), solo para CrewAI
-- OpenSpec CLI, para trabajar con especificaciones
+- `mise`, instalado por el bootstrap si no esta disponible
 
 Las versiones de dependencias del proyecto quedan fijadas en `pnpm-lock.yaml` y `crewai/uv.lock`.
 
-### pnpm
-
-Con Node.js 20 puede habilitarse pnpm mediante Corepack:
-
-```bash
-corepack enable pnpm
-pnpm --version
-```
-
-La documentacion oficial de pnpm confirma el uso de `--filter` para seleccionar paquetes del workspace. Los nombres validos de este repositorio usan el scope `@koty-app/*`.
-
-### uv
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv --version
-```
-
-### OpenSpec
-
-```bash
-npm install -g @fission-ai/openspec@latest
-openspec --version
-```
-
 ## Instalacion
 
-Desde la raiz del repositorio:
+Desde la raiz del repositorio, el flujo completo es:
 
 ```bash
-pnpm install
+./scripts/bootstrap.sh
+# ejecutar las instrucciones que imprime para activar mise en este shell
+# completar crewai/.env
+./scripts/doctor.sh
+pnpm verify
+cd crewai
+uv run run_crew DEV-5
 ```
+
+`bootstrap.sh` instala `mise` cuando hace falta, instala las versiones fijadas en `.mise.toml`, sincroniza las dependencias pnpm y uv con sus lockfiles y crea `crewai/.env` desde el ejemplo solo si no existe. Al final ejecuta `doctor.sh`; por eso puede devolver un codigo distinto de cero hasta que se completen las credenciales y modelos requeridos en `crewai/.env`. Despues de completarlos, vuelve a ejecutar `./scripts/doctor.sh`.
+
+El bootstrap no puede modificar el shell padre. En un resultado exitoso imprime instrucciones idempotentes para agregar `~/.local/bin` y activar `mise` en Bash o Zsh. Ejecuta ese bloque antes de usar los comandos bare `pnpm` y `uv` mostrados en el resto de este documento.
+
+Si prefieres no modificar la configuracion del shell, usa la ruta de `mise` que imprime el bootstrap:
+
+```bash
+"$HOME/.local/bin/mise" exec -- pnpm verify
+"$HOME/.local/bin/mise" exec -- uv run --project crewai run_crew DEV-5
+```
+
+Si `mise` ya estaba instalado en otra ruta, sustituye `"$HOME/.local/bin/mise"` por la ruta resuelta que aparece en la salida. La forma general de la alternativa es `mise exec -- <comando>`.
+
+No se activa manualmente `crewai/.venv`: `uv run` selecciona el entorno sincronizado. OpenSpec es una dependencia local del workspace y se invoca con `pnpm exec openspec`; no se instala globalmente.
+
+`DEV-5` esta archivado en OpenSpec. El comando anterior documenta la forma del entrypoint; toda ejecucion que pueda crear, modificar o archivar artefactos debe sustituirlo por un ticket activo.
 
 Actualmente el archivo `.env.example` de la raiz documenta variables previstas, pero las aplicaciones Node no cargan de forma uniforme un `.env.local` raiz. En particular, la API necesita recibir `PORT` desde el entorno para no competir con la web por el puerto 3000.
 
@@ -111,7 +109,7 @@ Disponible en:
 
 ### Worker
 
-El worker no expone HTTP. Sus scripts `dev` y `start` apuntan actualmente a `src/index.ts` y `dist/index.js`, que solo exportan la clase y no ejecutan el bootstrap de `src/main.ts`. Por eso no debe considerarse operativo hasta corregir sus entrypoints.
+El worker no expone HTTP. `pnpm --filter @koty-app/worker dev` ejecuta `src/main.ts`; el comando `start` ejecuta `dist/main.js` despues del build.
 
 ### Todos los paquetes
 
@@ -121,7 +119,7 @@ El script raiz existe:
 pnpm dev
 ```
 
-Ejecuta en paralelo todos los scripts `dev` del workspace. En el estado actual no es el flujo recomendado porque web y API intentan usar el puerto 3000 si `PORT` no se exporta, y el worker no inicia su bootstrap.
+Ejecuta en paralelo todos los scripts `dev` del workspace. Web y API intentan usar el puerto 3000 si `PORT` no se exporta, por lo que conviene iniciar la API con un puerto explicito.
 
 ## Scripts Node
 
@@ -131,13 +129,17 @@ Los siguientes scripts existen en el `package.json` raiz:
 | --- | --- |
 | `pnpm dev` | Ejecuta los scripts `dev` del workspace en paralelo. |
 | `pnpm build` | Compila recursivamente los paquetes que definen `build`. |
-| `pnpm lint` | Ejecuta lint recursivamente; API y worker aplican `--fix`. |
+| `pnpm lint` | Ejecuta lint recursivamente en modo de solo lectura. |
+| `pnpm test` | Ejecuta la suite Vitest. |
+| `pnpm test:shell` | Ejecuta las pruebas shell de bootstrap y doctor. |
+| `pnpm crew:check` | Ejecuta pytest y la validacion estricta de OpenSpec. |
+| `pnpm verify` | Ejecuta lint, todas las pruebas, builds y verificaciones de CrewAI/OpenSpec. |
 | `pnpm clean` | Elimina artefactos generados mediante los scripts de cada paquete. |
 | `pnpm start:web` | Inicia un build previo de Next.js. |
 | `pnpm start:api` | Inicia el artefacto compilado de la API. |
-| `pnpm start:worker` | Script presente, pero bloqueado por el entrypoint descrito arriba. |
+| `pnpm start:worker` | Inicia el artefacto compilado del worker. |
 
-No existen todavia los scripts `test`, `format`, `db:start` ni `db:stop`.
+No existen todavia los scripts `format`, `db:start` ni `db:stop`.
 
 ## Paquetes Compartidos
 
@@ -151,13 +153,7 @@ Exporta configuraciones compartidas de TypeScript y ESLint. Tailwind CSS permane
 
 ## CrewAI
 
-El subproyecto `crewai/` automatiza analisis, planificacion, implementacion y revision de cambios mediante agentes. Sus dependencias se administran exclusivamente con `uv`.
-
-```bash
-cd crewai
-uv sync --frozen
-cp .env.example .env
-```
+El subproyecto `crewai/` automatiza analisis, planificacion, implementacion y revision de cambios mediante agentes. Sus dependencias se administran exclusivamente con `uv` y las sincroniza `./scripts/bootstrap.sh`.
 
 Configura en `crewai/.env` las claves y modelos requeridos por el archivo de ejemplo:
 
@@ -169,16 +165,12 @@ Configura en `crewai/.env` las claves y modelos requeridos por el archivo de eje
 - `ZEN_CODER_MODEL`
 - `ZEN_REVIEWER_MODEL`
 
-Ejecutar un ticket:
+Despues de activar `mise` con el bloque impreso por bootstrap y de que `./scripts/doctor.sh` y `pnpm verify` finalicen correctamente, ejecutar un ticket activo:
 
 ```bash
-uv run run_crew DEV-5
-```
-
-Alternativamente:
-
-```bash
-uv run python src/crew/main.py DEV-5
+export TICKET_ACTIVO=DEV-123 # reemplazar por un ticket activo real
+cd crewai
+uv run run_crew "$TICKET_ACTIVO"
 ```
 
 No es necesario activar manualmente `crewai/.venv`. Para agregar o eliminar dependencias:
@@ -197,11 +189,11 @@ OpenSpec mantiene las especificaciones actuales en `openspec/specs/` y el histor
 Comandos utiles desde la raiz:
 
 ```bash
-openspec list
-openspec list --specs
-openspec show my-change
-openspec status --change my-change
-openspec validate --all --strict
+pnpm exec openspec list
+pnpm exec openspec list --specs
+pnpm exec openspec show my-change
+pnpm exec openspec status --change my-change
+pnpm exec openspec validate --all --strict
 ```
 
 Los identificadores de cambios activos usan kebab-case en minusculas. `DEV-5` ya esta archivado en `openspec/changes/archive/2026-08-18-dev-5/`, por lo que no aparece como cambio activo.
@@ -210,8 +202,7 @@ Los identificadores de cambios activos usan kebab-case en minusculas. `DEV-5` ya
 
 - El codigo presente es scaffolding y no implementa todavia el incremento 0.
 - No hay PostgreSQL local, Prisma, migraciones ni Docker Compose.
-- `pnpm test`, `pnpm format`, `pnpm db:start` y `pnpm db:stop` no existen.
-- El worker no ejecuta su bootstrap mediante sus scripts actuales.
+- `pnpm format`, `pnpm db:start` y `pnpm db:stop` no existen.
 - La estrategia de variables de entorno Node aun no esta unificada.
 - Los comandos `start` de produccion requieren revision antes de usarse para despliegue.
 

@@ -32,19 +32,37 @@ Antes de comenzar a trabajar en el proyecto, asegúrate de tener instalados:
 * Docker
 * Python
 * uv
-* OpenSpec CLI
 
-Verifica:
+Las versiones de Node.js, pnpm, Python y uv estan fijadas en `.mise.toml`. Desde la raiz, prepara y verifica el entorno con:
 
 ```bash
-git --version
-node --version
-pnpm --version
-docker --version
-python --version
-uv --version
-openspec --version
+./scripts/bootstrap.sh
+# ejecutar las instrucciones que imprime para activar mise en este shell
+# completar crewai/.env
+./scripts/doctor.sh
+pnpm verify
+cd crewai
+uv run run_crew DEV-5
 ```
+
+`bootstrap.sh` instala `mise` cuando hace falta, instala las versiones fijadas, sincroniza las dependencias pnpm y uv con sus lockfiles y crea `crewai/.env` desde el ejemplo solo si no existe. Ejecuta `doctor.sh` al final, por lo que puede devolver un codigo distinto de cero hasta que se completen las credenciales y modelos requeridos; despues debe repetirse `./scripts/doctor.sh`.
+
+El bootstrap no puede modificar el shell padre. Cuando termina correctamente imprime instrucciones idempotentes para agregar `~/.local/bin` y activar `mise` en Bash o Zsh. Ejecuta ese bloque antes de usar cualquier comando bare `pnpm` o `uv` de esta guia.
+
+Si no quieres modificar la configuracion del shell, usa la ruta resuelta que muestra el bootstrap:
+
+```bash
+"$HOME/.local/bin/mise" exec -- pnpm verify
+"$HOME/.local/bin/mise" exec -- uv run --project crewai run_crew DEV-5
+```
+
+Si `mise` ya estaba instalado en otra ruta, reemplaza `"$HOME/.local/bin/mise"` por la ruta impresa. La forma general es `mise exec -- <comando>`.
+
+No requiere activacion manual de `crewai/.venv`: usa `uv run`. OpenSpec es local al workspace y todos sus comandos se ejecutan desde la raiz mediante `pnpm exec openspec`; no requiere instalacion global.
+
+`DEV-5` esta archivado. El comando del flujo documenta el formato del entrypoint; si la ejecucion puede crear, modificar o archivar artefactos, sustituye `DEV-5` por un ticket activo.
+
+Los ejemplos operativos usan `TICKET_ACTIVO` y `CHANGE_ID_ACTIVO`. Asigna los identificadores reales antes de ejecutarlos, por ejemplo `export TICKET_ACTIVO=DEV-123` y `export CHANGE_ID_ACTIVO=dev-123`.
 
 Consulta el `README.md` principal para las instrucciones completas de instalación.
 
@@ -340,16 +358,16 @@ Senior Software Developer
 Quality Reviewer
 ```
 
-El Crew debe ejecutarse desde la branch correspondiente al ticket.
+El Crew debe ejecutarse desde la branch correspondiente a un ticket activo.
 
 Ejemplo:
 
 ```bash
-git switch -c feat/dev-5-inicializar-monorepo
+git switch -c feat/dev-6-agregar-autenticacion
 
 cd crewai
 
-uv run run_crew dev-5
+uv run run_crew DEV-6
 ```
 
 No ejecutes el Crew para desarrollar una feature directamente sobre:
@@ -403,13 +421,13 @@ tasks.md
 Antes de considerar terminado un cambio:
 
 ```bash
-openspec validate dev-5 --strict --no-interactive
+pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 También puedes revisar tareas pendientes:
 
 ```bash
-grep -n '\[ \]' openspec/changes/dev-5/tasks.md
+grep -n '\[ \]' "openspec/changes/$CHANGE_ID_ACTIVO/tasks.md"
 ```
 
 Si no devuelve resultados, todas las tareas están marcadas como completadas.
@@ -421,7 +439,7 @@ Si no devuelve resultados, todas las tareas están marcadas como completadas.
 Si el Reviewer rechaza un cambio, no elimines automáticamente:
 
 ```text
-openspec/changes/dev-5/
+openspec/changes/$CHANGE_ID_ACTIVO/
 ```
 
 Corrige los problemas indicados y vuelve a ejecutar:
@@ -429,7 +447,7 @@ Corrige los problemas indicados y vuelve a ejecutar:
 ```bash
 cd crewai
 
-uv run run_crew dev-5
+uv run run_crew "$TICKET_ACTIVO"
 ```
 
 Conserva:
@@ -452,12 +470,10 @@ Antes de crear un Pull Request, deben ejecutarse las validaciones del monorepo.
 Desde la raíz:
 
 ```bash
-pnpm lint
-pnpm test
-pnpm build
+pnpm verify
 ```
 
-Todas deben finalizar correctamente.
+La puerta incluye lint, Vitest, pruebas shell, builds, pytest y validacion estricta de OpenSpec. Debe finalizar correctamente.
 
 ---
 
@@ -478,7 +494,7 @@ uv run python -m compileall -q src/crew
 Desde la raíz:
 
 ```bash
-openspec validate dev-5 --strict --no-interactive
+pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 ---
@@ -832,15 +848,8 @@ Resumen del cambio implementado.
 Ejecuta:
 
 ```bash
-pnpm lint
-pnpm test
-pnpm build
-```
-
-Después:
-
-```bash
-openspec validate dev-5 --strict --no-interactive
+pnpm verify
+pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 Y:
@@ -1183,11 +1192,8 @@ Un ticket se considera terminado cuando:
 * [ ] el ticket fue implementado;
 * [ ] los requisitos de OpenSpec están cubiertos;
 * [ ] todas las tasks de OpenSpec están completas;
-* [ ] `pnpm lint` pasa;
-* [ ] `pnpm test` pasa;
-* [ ] `pnpm build` pasa;
-* [ ] la validación Python pasa cuando corresponda;
-* [ ] `openspec validate` pasa;
+* [ ] `pnpm verify` pasa;
+* [ ] `pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive` pasa;
 * [ ] no hay secretos en Git;
 * [ ] el diff fue revisado;
 * [ ] la branch fue subida;
@@ -1200,10 +1206,10 @@ Un ticket se considera terminado cuando:
 
 # 41. Resumen rápido
 
-Para un ticket:
+Para un ticket activo, por ejemplo:
 
 ```text
-DEV-5
+DEV-6
 ```
 
 Ejecuta:
@@ -1212,25 +1218,22 @@ Ejecuta:
 git switch main
 git pull origin main
 
-git switch -c feat/dev-5-inicializar-monorepo
+git switch -c feat/dev-6-agregar-autenticacion
 ```
 
 Si corresponde usar CrewAI:
 
 ```bash
 cd crewai
-uv run run_crew dev-5
+uv run run_crew DEV-6
 cd ..
 ```
 
 Valida:
 
 ```bash
-pnpm lint
-pnpm test
-pnpm build
-
-openspec validate dev-5 --strict --no-interactive
+pnpm verify
+pnpm exec openspec validate dev-6 --strict --no-interactive
 ```
 
 Revisa:
@@ -1295,4 +1298,3 @@ main
 La regla general es:
 
 > Un ticket, una branch, un cambio OpenSpec y un Pull Request.
-
