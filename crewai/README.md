@@ -63,7 +63,7 @@ Como alternativa sin modificar el shell, usa la ruta resuelta que muestra el boo
 
 Si `mise` ya existia en otra ruta, reemplaza `"$HOME/.local/bin/mise"` por la ruta impresa. La forma general es `mise exec -- <comando>`.
 
-No se requiere activar manualmente `.venv`: los comandos `uv run` usan el entorno sincronizado. OpenSpec se instala como dependencia local del workspace Node y se ejecuta desde la raiz con `pnpm exec openspec`, sin instalacion global.
+No se requiere activar manualmente `.venv`: los comandos `uv run` usan el entorno sincronizado. OpenSpec se instala como dependencia local del workspace Node y se ejecuta desde la raiz con `OPENSPEC_TELEMETRY=0 pnpm exec openspec`, sin instalacion global.
 
 `DEV-5` esta archivado en `openspec/changes/archive/2026-08-18-dev-5/`. El comando del flujo muestra el formato aceptado; una ejecucion que pueda modificar o archivar artefactos debe usar un ticket activo.
 
@@ -475,7 +475,7 @@ y comprobar:
 Después ejecuta:
 
 ```bash
-pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
+OPENSPEC_TELEMETRY=0 pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 Si cualquier comprobación falla:
@@ -493,7 +493,7 @@ y el cambio no se archiva.
 Solo cuando todas las verificaciones son correctas, el Reviewer ejecuta:
 
 ```bash
-pnpm exec openspec archive "$CHANGE_ID_ACTIVO" --yes
+OPENSPEC_TELEMETRY=0 pnpm exec openspec archive "$CHANGE_ID_ACTIVO" --yes
 ```
 
 El parámetro:
@@ -556,7 +556,7 @@ cd ..
 
 ```bash
 pnpm verify
-pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
+OPENSPEC_TELEMETRY=0 pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 Y revisar tareas pendientes:
@@ -918,13 +918,13 @@ pnpm verify
 ## Estado OpenSpec
 
 ```bash
-pnpm exec openspec status --change "$CHANGE_ID_ACTIVO"
+OPENSPEC_TELEMETRY=0 pnpm exec openspec status --change "$CHANGE_ID_ACTIVO"
 ```
 
 ## Validar OpenSpec
 
 ```bash
-pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
+OPENSPEC_TELEMETRY=0 pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 ## Buscar tareas pendientes
@@ -938,7 +938,7 @@ grep -n '\[ \]' "openspec/changes/$CHANGE_ID_ACTIVO/tasks.md"
 Solo cuando todas las verificaciones sean correctas:
 
 ```bash
-pnpm exec openspec archive "$CHANGE_ID_ACTIVO" --yes
+OPENSPEC_TELEMETRY=0 pnpm exec openspec archive "$CHANGE_ID_ACTIVO" --yes
 ```
 
 Normalmente este último paso debe realizarlo el Reviewer automáticamente.

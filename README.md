@@ -80,7 +80,7 @@ Si prefieres no modificar la configuracion del shell, usa la ruta de `mise` que 
 
 Si `mise` ya estaba instalado en otra ruta, sustituye `"$HOME/.local/bin/mise"` por la ruta resuelta que aparece en la salida. La forma general de la alternativa es `mise exec -- <comando>`.
 
-No se activa manualmente `crewai/.venv`: `uv run` selecciona el entorno sincronizado. OpenSpec es una dependencia local del workspace y se invoca con `pnpm exec openspec`; no se instala globalmente.
+No se activa manualmente `crewai/.venv`: `uv run` selecciona el entorno sincronizado. OpenSpec es una dependencia local del workspace y se invoca con `OPENSPEC_TELEMETRY=0 pnpm exec openspec`; no se instala globalmente.
 
 `DEV-5` esta archivado en OpenSpec. El comando anterior documenta la forma del entrypoint; toda ejecucion que pueda crear, modificar o archivar artefactos debe sustituirlo por un ticket activo.
 
@@ -189,11 +189,11 @@ OpenSpec mantiene las especificaciones actuales en `openspec/specs/` y el histor
 Comandos utiles desde la raiz:
 
 ```bash
-pnpm exec openspec list
-pnpm exec openspec list --specs
-pnpm exec openspec show my-change
-pnpm exec openspec status --change my-change
-pnpm exec openspec validate --all --strict
+OPENSPEC_TELEMETRY=0 pnpm exec openspec list
+OPENSPEC_TELEMETRY=0 pnpm exec openspec list --specs
+OPENSPEC_TELEMETRY=0 pnpm exec openspec show my-change
+OPENSPEC_TELEMETRY=0 pnpm exec openspec status --change my-change
+OPENSPEC_TELEMETRY=0 pnpm exec openspec validate --all --strict
 ```
 
 Los identificadores de cambios activos usan kebab-case en minusculas. `DEV-5` ya esta archivado en `openspec/changes/archive/2026-08-18-dev-5/`, por lo que no aparece como cambio activo.

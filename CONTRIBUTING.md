@@ -58,7 +58,7 @@ Si no quieres modificar la configuracion del shell, usa la ruta resuelta que mue
 
 Si `mise` ya estaba instalado en otra ruta, reemplaza `"$HOME/.local/bin/mise"` por la ruta impresa. La forma general es `mise exec -- <comando>`.
 
-No requiere activacion manual de `crewai/.venv`: usa `uv run`. OpenSpec es local al workspace y todos sus comandos se ejecutan desde la raiz mediante `pnpm exec openspec`; no requiere instalacion global.
+No requiere activacion manual de `crewai/.venv`: usa `uv run`. OpenSpec es local al workspace y todos sus comandos se ejecutan desde la raiz mediante `OPENSPEC_TELEMETRY=0 pnpm exec openspec`; no requiere instalacion global.
 
 `DEV-5` esta archivado. El comando del flujo documenta el formato del entrypoint; si la ejecucion puede crear, modificar o archivar artefactos, sustituye `DEV-5` por un ticket activo.
 
@@ -421,7 +421,7 @@ tasks.md
 Antes de considerar terminado un cambio:
 
 ```bash
-pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
+OPENSPEC_TELEMETRY=0 pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 También puedes revisar tareas pendientes:
@@ -494,7 +494,7 @@ uv run python -m compileall -q src/crew
 Desde la raíz:
 
 ```bash
-pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
+OPENSPEC_TELEMETRY=0 pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 ---
@@ -849,7 +849,7 @@ Ejecuta:
 
 ```bash
 pnpm verify
-pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
+OPENSPEC_TELEMETRY=0 pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 Y:
@@ -1193,7 +1193,7 @@ Un ticket se considera terminado cuando:
 * [ ] los requisitos de OpenSpec están cubiertos;
 * [ ] todas las tasks de OpenSpec están completas;
 * [ ] `pnpm verify` pasa;
-* [ ] `pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive` pasa;
+* [ ] `OPENSPEC_TELEMETRY=0 pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive` pasa;
 * [ ] no hay secretos en Git;
 * [ ] el diff fue revisado;
 * [ ] la branch fue subida;
@@ -1233,7 +1233,7 @@ Valida:
 
 ```bash
 pnpm verify
-pnpm exec openspec validate dev-6 --strict --no-interactive
+OPENSPEC_TELEMETRY=0 pnpm exec openspec validate dev-6 --strict --no-interactive
 ```
 
 Revisa:
