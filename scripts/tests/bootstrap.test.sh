@@ -308,6 +308,29 @@ run_bootstrap() {
   )
 }
 
+run_worker_lint_without_contract_dist() (
+  local contracts_dist="$REPO_ROOT/packages/contracts/dist"
+  local saved_dist="$TEST_ROOT/contracts-dist.saved"
+
+  restore_contract_dist() {
+    if [[ -e "$saved_dist" ]]; then
+      mv "$saved_dist" "$contracts_dist"
+    fi
+  }
+
+  trap restore_contract_dist EXIT
+
+  if [[ -d "$contracts_dist" ]]; then
+    mv "$contracts_dist" "$saved_dist"
+  fi
+
+  (
+    cd "$REPO_ROOT/apps/worker"
+    mise exec -- pnpm exec tsc --project tsconfig.eslint.json --noEmit --rootDir ../..
+    mise exec -- pnpm lint
+  )
+)
+
 portable_hash_bin="$TEST_ROOT/portable-hash-bin"
 mkdir -p "$portable_hash_bin"
 cat >"$portable_hash_bin/shasum" <<'SHASUM'
@@ -648,5 +671,7 @@ $doctor_fixture|exec -- uv run --project crewai --no-sync python -c import crew;
 EOF
 cmp -s "$TEST_ROOT/doctor-commands.expected" "$doctor_log" || fail "unexpected doctor commands"
 assert_contains "$doctor_log.openspec-env" "0"
+
+run_worker_lint_without_contract_dist
 
 printf 'PASS: bootstrap behavior\n'
