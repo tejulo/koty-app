@@ -18,8 +18,13 @@ run_crew = "crew.main:run"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.build.targuts.wheel]
+[tool.hatch.build.targets.wheel]
 packages = ["src/crew"]
 
 [tool.crewai]
 type = "crew"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

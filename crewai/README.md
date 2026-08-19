@@ -37,17 +37,37 @@ Antes de utilizar este módulo debes tener instalados:
 * uv
 * Node.js
 * pnpm
-* OpenSpec CLI
 
-Verificar:
+Las versiones del proyecto estan fijadas en `../.mise.toml`. Desde la raiz del monorepo, el flujo completo es:
 
 ```bash
-python --version
-uv --version
-node --version
-pnpm --version
-openspec --version
+./scripts/bootstrap.sh
+# ejecutar las instrucciones que imprime para activar mise en este shell
+# completar crewai/.env
+./scripts/doctor.sh
+pnpm verify
+cd crewai
+uv run run_crew DEV-5
 ```
+
+`bootstrap.sh` instala `mise` cuando hace falta, instala las versiones fijadas, sincroniza pnpm y uv con sus lockfiles y crea `crewai/.env` desde `.env.example` solo si no existe. Como ejecuta `doctor.sh` al final, puede devolver un codigo distinto de cero mientras falten credenciales o modelos en `crewai/.env`; completa esos valores y ejecuta nuevamente `./scripts/doctor.sh`.
+
+El bootstrap no puede modificar el shell padre. Cuando termina correctamente imprime un bloque idempotente para agregar `~/.local/bin` y activar `mise` en Bash o Zsh. Los comandos bare `pnpm` y `uv` de este documento presuponen que ese bloque ya se ejecuto en la terminal actual.
+
+Como alternativa sin modificar el shell, usa la ruta resuelta que muestra el bootstrap:
+
+```bash
+"$HOME/.local/bin/mise" exec -- pnpm verify
+"$HOME/.local/bin/mise" exec -- uv run --project crewai run_crew DEV-5
+```
+
+Si `mise` ya existia en otra ruta, reemplaza `"$HOME/.local/bin/mise"` por la ruta impresa. La forma general es `mise exec -- <comando>`.
+
+No se requiere activar manualmente `.venv`: los comandos `uv run` usan el entorno sincronizado. OpenSpec se instala como dependencia local del workspace Node y se ejecuta desde la raiz con `pnpm exec openspec`, sin instalacion global.
+
+`DEV-5` esta archivado en `openspec/changes/archive/2026-08-18-dev-5/`. El comando del flujo muestra el formato aceptado; una ejecucion que pueda modificar o archivar artefactos debe usar un ticket activo.
+
+Los ejemplos siguientes usan `TICKET_ACTIVO` y `CHANGE_ID_ACTIVO`. Antes de ejecutarlos, asigna el identificador real, por ejemplo `export TICKET_ACTIVO=DEV-123` y `export CHANGE_ID_ACTIVO=dev-123`.
 
 ---
 
@@ -82,25 +102,13 @@ Por esta razón, las herramientas internas de CrewAI ejecutan OpenSpec utilizand
 
 # Instalación
 
-Entrar al proyecto CrewAI:
+`./scripts/bootstrap.sh`, ejecutado desde la raiz, sincroniza el entorno con:
 
 ```bash
-cd crewai
+uv sync --project crewai --frozen
 ```
 
-Sincronizar el entorno:
-
-```bash
-uv sync --frozen
-```
-
-Durante desarrollo también puede utilizarse:
-
-```bash
-uv sync
-```
-
-Esto crea automáticamente:
+Esto crea:
 
 ```text
 crewai/.venv/
@@ -109,21 +117,17 @@ crewai/.venv/
 e instala las dependencias definidas en:
 
 ```text
-pyproject.toml
-uv.lock
+crewai/pyproject.toml
+crewai/uv.lock
 ```
 
-No es necesario utilizar `pip install`.
+No es necesario utilizar `pip install` ni activar el entorno.
 
 ---
 
 # Variables de entorno
 
-Crear el archivo local:
-
-```bash
-cp .env.example .env
-```
+El bootstrap crea `crewai/.env` desde `crewai/.env.example` si no existe y nunca sobrescribe un archivo existente.
 
 Ejemplo:
 
@@ -189,16 +193,10 @@ koty-app/crewai/
 ejecutar:
 
 ```bash
-uv run run_crew dev-5
+uv run run_crew "$TICKET_ACTIVO"
 ```
 
-También es válido:
-
-```bash
-uv run run_crew DEV-5
-```
-
-El programa normaliza automáticamente el identificador.
+El programa normaliza el identificador. `DEV-5` y `dev-5` sirven para verificar esa normalizacion, pero no para una ejecucion que cambie artefactos porque el cambio ya esta archivado.
 
 Por ejemplo:
 
@@ -213,17 +211,7 @@ OpenSpec:
 dev-5
 ```
 
-Por lo tanto, el desarrollador puede utilizar indistintamente:
-
-```bash
-uv run run_crew dev-5
-```
-
-o:
-
-```bash
-uv run run_crew DEV-5
-```
+Para trabajo real, reemplaza el ejemplo por el identificador de un ticket activo.
 
 ---
 
@@ -238,7 +226,7 @@ uv run run_crew
 El programa solicitará:
 
 ```text
-Ingresa el identificador del ticket (ej. DEV-5 o dev-5):
+Ingresa el identificador de un ticket activo:
 ```
 
 ---
@@ -397,7 +385,7 @@ No deben quedar tareas pendientes antes del archivado.
 Comprobar:
 
 ```bash
-grep -n '\[ \]' ../openspec/changes/dev-5/tasks.md
+grep -n '\[ \]' "../openspec/changes/$CHANGE_ID_ACTIVO/tasks.md"
 ```
 
 Si no devuelve resultados, no existen tareas pendientes.
@@ -447,32 +435,13 @@ a:
 
 # Verificaciones del Programmer
 
-Antes de finalizar, el Programmer debe ejecutar:
-
-```text
-python
-lint
-test
-build
-```
-
-Estas verificaciones llaman internamente a:
+Antes de finalizar, desde la raiz se ejecuta la puerta completa:
 
 ```bash
-uv run python -m compileall -q src/crew
+pnpm verify
 ```
 
-```bash
-pnpm lint
-```
-
-```bash
-pnpm test
-```
-
-```bash
-pnpm build
-```
+Este comando incluye lint, Vitest, pruebas shell, builds, pytest y validacion estricta de OpenSpec.
 
 Si cualquiera falla, el Programmer debe corregir el problema antes de finalizar.
 
@@ -506,7 +475,7 @@ y comprobar:
 Después ejecuta:
 
 ```bash
-openspec validate dev-5 --strict --no-interactive
+pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 Si cualquier comprobación falla:
@@ -524,7 +493,7 @@ y el cambio no se archiva.
 Solo cuando todas las verificaciones son correctas, el Reviewer ejecuta:
 
 ```bash
-openspec archive dev-5 --yes
+pnpm exec openspec archive "$CHANGE_ID_ACTIVO" --yes
 ```
 
 El parámetro:
@@ -546,14 +515,14 @@ Si el Reviewer rechaza una ejecución, normalmente **no debes borrar el cambio O
 Por ejemplo, conserva:
 
 ```text
-openspec/changes/dev-5/
+openspec/changes/$CHANGE_ID_ACTIVO/
 ```
 
 Corrige los problemas detectados y vuelve a ejecutar:
 
 ```bash
 cd crewai
-uv run run_crew dev-5
+uv run run_crew "$TICKET_ACTIVO"
 ```
 
 El Crew debe continuar utilizando el cambio existente.
@@ -565,10 +534,10 @@ El Crew debe continuar utilizando el cambio existente.
 No borres:
 
 ```text
-openspec/changes/dev-5/proposal.md
-openspec/changes/dev-5/design.md
-openspec/changes/dev-5/specs/
-openspec/changes/dev-5/tasks.md
+openspec/changes/$CHANGE_ID_ACTIVO/proposal.md
+openspec/changes/$CHANGE_ID_ACTIVO/design.md
+openspec/changes/$CHANGE_ID_ACTIVO/specs/
+openspec/changes/$CHANGE_ID_ACTIVO/tasks.md
 ```
 
 Tampoco borres el código ya implementado.
@@ -586,34 +555,21 @@ cd ..
 ```
 
 ```bash
-pnpm lint
-```
-
-```bash
-pnpm test
-```
-
-```bash
-pnpm build
-```
-
-Después:
-
-```bash
-openspec validate dev-5 --strict --no-interactive
+pnpm verify
+pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 Y revisar tareas pendientes:
 
 ```bash
-grep -n '\[ \]' openspec/changes/dev-5/tasks.md
+grep -n '\[ \]' "openspec/changes/$CHANGE_ID_ACTIVO/tasks.md"
 ```
 
 Si todo está correcto:
 
 ```bash
 cd crewai
-uv run run_crew dev-5
+uv run run_crew "$TICKET_ACTIVO"
 ```
 
 ---
@@ -925,25 +881,9 @@ uv sync --frozen
 
 ---
 
-# Activar manualmente el entorno virtual
+# Entorno virtual
 
-No es necesario cuando se utiliza:
-
-```bash
-uv run ...
-```
-
-Pero puede activarse manualmente:
-
-```bash
-source .venv/bin/activate
-```
-
-Salir:
-
-```bash
-deactivate
-```
+No requiere activacion manual. Usa `uv run ...` desde `crewai/`.
 
 ---
 
@@ -952,7 +892,7 @@ deactivate
 ## Ejecutar Crew
 
 ```bash
-uv run run_crew dev-5
+uv run run_crew "$TICKET_ACTIVO"
 ```
 
 ## Sincronizar Python
@@ -967,42 +907,30 @@ uv sync
 uv run python -m compileall -q src/crew
 ```
 
-## Lint del monorepo
+## Puerta completa del monorepo
 
 Desde la raíz:
 
 ```bash
-pnpm lint
-```
-
-## Tests
-
-```bash
-pnpm test
-```
-
-## Build
-
-```bash
-pnpm build
+pnpm verify
 ```
 
 ## Estado OpenSpec
 
 ```bash
-openspec status --change dev-5
+pnpm exec openspec status --change "$CHANGE_ID_ACTIVO"
 ```
 
 ## Validar OpenSpec
 
 ```bash
-openspec validate dev-5 --strict --no-interactive
+pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
 ## Buscar tareas pendientes
 
 ```bash
-grep -n '\[ \]' openspec/changes/dev-5/tasks.md
+grep -n '\[ \]' "openspec/changes/$CHANGE_ID_ACTIVO/tasks.md"
 ```
 
 ## Archivar manualmente
@@ -1010,7 +938,7 @@ grep -n '\[ \]' openspec/changes/dev-5/tasks.md
 Solo cuando todas las verificaciones sean correctas:
 
 ```bash
-openspec archive dev-5 --yes
+pnpm exec openspec archive "$CHANGE_ID_ACTIVO" --yes
 ```
 
 Normalmente este último paso debe realizarlo el Reviewer automáticamente.
@@ -1026,37 +954,19 @@ git clone <REPOSITORIO>
 cd koty-app
 ```
 
-Instalar las dependencias del monorepo:
+Preparar, completar credenciales, diagnosticar y verificar:
 
 ```bash
-pnpm install
-```
-
-Entrar al Crew:
-
-```bash
+./scripts/bootstrap.sh
+# ejecutar las instrucciones que imprime para activar mise en este shell
+# completar crewai/.env
+./scripts/doctor.sh
+pnpm verify
 cd crewai
+uv run run_crew DEV-5
 ```
 
-Sincronizar Python:
-
-```bash
-uv sync --frozen
-```
-
-Crear variables locales:
-
-```bash
-cp .env.example .env
-```
-
-Configurar las API keys y modelos.
-
-Ejecutar:
-
-```bash
-uv run run_crew dev-5
-```
+El ultimo comando muestra el formato del entrypoint. Para una ejecucion que cambie artefactos, usa un ticket activo en lugar de `DEV-5`.
 
 ---
 
@@ -1065,10 +975,10 @@ uv run run_crew dev-5
 El flujo completo es:
 
 ```text
-uv run run_crew dev-5
+uv run run_crew "$TICKET_ACTIVO"
         │
         ▼
-Linear DEV-5
+Linear $TICKET_ACTIVO
         │
         ▼
 Requirements Analyst
@@ -1077,7 +987,7 @@ Requirements Analyst
 Software Architect
         │
         ▼
-OpenSpec dev-5
+OpenSpec $CHANGE_ID_ACTIVO
         │
         ├── proposal.md
         ├── specs/
@@ -1108,4 +1018,3 @@ OpenSpec archive
 La regla principal del sistema es:
 
 > El ticket define qué construir, OpenSpec define el contrato y el diseño, el Programmer implementa ese contrato y el Reviewer solo permite el archivado cuando todas las verificaciones pasan.
-

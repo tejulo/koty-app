@@ -1,4 +1,5 @@
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -352,31 +353,50 @@ def _validar_comando_openspec(
         )
 
     comando = argumentos[0]
+    change_id: str | None = None
 
-    permitidos = {
-        "new",
-        "status",
-        "validate",
-        "archive",
-        "list",
-        "show",
-        "instructions",
-    }
-
-    if comando not in permitidos:
+    if comando == "new":
+        if len(argumentos) == 3 and argumentos[:2] == ["new", "change"]:
+            change_id = argumentos[2]
+    elif comando == "validate":
+        if (
+            len(argumentos) == 4
+            and argumentos[2:] == ["--strict", "--no-interactive"]
+        ):
+            change_id = argumentos[1]
+    elif comando == "archive":
+        if len(argumentos) == 3 and argumentos[2] == "--yes":
+            change_id = argumentos[1]
+    elif comando == "list":
+        if argumentos == ["list"]:
+            return
+    elif comando == "show":
+        if len(argumentos) == 2:
+            change_id = argumentos[1]
+    elif comando == "status":
+        if len(argumentos) == 3 and argumentos[1] == "--change":
+            change_id = argumentos[2]
+    elif comando == "instructions":
+        if len(argumentos) == 2:
+            change_id = argumentos[1]
+    else:
         raise ValueError(
             f"Comando OpenSpec no permitido: "
             f"'{comando}'."
         )
 
-    if comando == "new":
-        if (
-            len(argumentos) < 2
-            or argumentos[1] != "change"
-        ):
-            raise ValueError(
-                "Solo se permite 'new change'."
-            )
+    if change_id is None:
+        raise ValueError(
+            f"Argumentos no permitidos para OpenSpec '{comando}'."
+        )
+
+    if not re.fullmatch(
+        r"[a-z0-9]+(?:-[a-z0-9]+)*",
+        change_id,
+    ):
+        raise ValueError(
+            "El change-id debe usar kebab-case en minúsculas."
+        )
 
 
 @tool("Ejecutar OpenSpec")
@@ -408,6 +428,8 @@ def ejecutar_openspec(
 
         resultado = subprocess.run(
             [
+                "pnpm",
+                "exec",
                 "openspec",
                 *argumentos,
             ],
@@ -416,6 +438,10 @@ def ejecutar_openspec(
             text=True,
             timeout=60,
             check=False,
+            env={
+                **os.environ,
+                "OPENSPEC_TELEMETRY": "0",
+            },
         )
 
         stdout = _truncar_texto(
@@ -462,9 +488,10 @@ def ejecutar_openspec(
 
     except FileNotFoundError:
         return (
-            "Error: No se encontró el comando "
-            "'openspec'. Comprueba que OpenSpec "
-            "esté instalado y disponible en PATH."
+            "Error: No se encontró 'pnpm'. Comprueba "
+            "que pnpm esté disponible y que la "
+            "dependencia local de OpenSpec esté "
+            "instalada en el workspace."
         )
 
     except subprocess.TimeoutExpired:
