@@ -1,0 +1,21 @@
+{
+  "name": "@koty-app/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./eslint/index.js",
+  "exports": {
+    "./eslint": "./eslint/index.js",
+    "./tsconfig/*": "./tsconfig/*.json"
+  },
+  "scripts": {
+    "dev": "echo 'No dev script needed'",
+    "build": "echo 'No build script needed'",
+    "lint": "eslint .",
+    "clean": "echo 'No clean script needed'"
+  },
+  "dependencies": {
+    "eslint": "9.39.5",
+    "typescript-eslint": "8.67.0"
+  }
+}

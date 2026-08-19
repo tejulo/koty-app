@@ -1,0 +1,29 @@
+{
+  "name": "koty-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.3.0",
+  "engines": {
+    "node": ">=20.19.0",
+    "pnpm": ">=8.15.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "vitest run",
+    "test:shell": "bash scripts/tests/bootstrap.test.sh",
+    "crew:check": "uv run --project crewai pytest crewai/tests -v && OPENSPEC_TELEMETRY=0 pnpm exec openspec validate --all --strict",
+    "verify": "pnpm lint && pnpm test && pnpm test:shell && pnpm build && pnpm crew:check",
+    "clean": "pnpm -r --filter=./** clean",
+    "start:web": "pnpm --filter @koty-app/web start",
+    "start:api": "pnpm --filter @koty-app/api start",
+    "start:worker": "pnpm --filter @koty-app/worker start"
+  },
+  "devDependencies": {
+    "@fission-ai/openspec": "1.4.1",
+    "eslint": "9.39.5",
+    "vitest": "3.2.6"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@koty-app/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc",
+    "lint": "eslint src/",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@koty-app/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.16",
+    "typescript": "^5.3.3",
+    "tsx": "^4.7.0",
+    "eslint": "9.39.5",
+    "@koty-app/config": "workspace:*"
+  }
+}
