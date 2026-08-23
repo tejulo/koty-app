@@ -55,3 +55,4 @@ coverage/
 
 # Misc
 *.local
+.worktrees/
