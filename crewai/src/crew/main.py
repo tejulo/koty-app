@@ -34,6 +34,17 @@ os.environ["OTEL_SDK_DISABLED"] = "true"
 
 # Importar CrewAI solamente después de configurar el entorno.
 from crew.crew import KotyAppCrew
+from crew.tools.custom_tool import (
+    _CAMBIOS_ARCHIVADOS,
+    _CAMBIOS_VALIDADOS,
+    _TICKETS_CONSULTADOS,
+    _TICKETS_INICIADOS,
+    _buscar_directorio_archivado,
+    completar_tarea_linear,
+    ejecutar_openspec,
+    ejecutar_verificacion,
+)
+from crewai.tools.tool_failure import ToolFailure
 
 
 def normalizar_ticket(raw_id: str) -> tuple[str, str]:
@@ -75,6 +86,67 @@ def normalizar_ticket(raw_id: str) -> tuple[str, str]:
     return ticket_id, change_id
 
 
+def _exigir_resultado_exitoso(
+    etiqueta: str,
+    resultado: str | ToolFailure,
+    prefijo_exitoso: str,
+) -> str:
+    if isinstance(resultado, ToolFailure):
+        raise RuntimeError(resultado.message)
+
+    print(resultado)
+
+    if not resultado.startswith(prefijo_exitoso):
+        raise RuntimeError(
+            f"{etiqueta} falló o no confirmó OK.\n{resultado}"
+        )
+
+    return resultado
+
+
+def finalizar_cambio_archivado(ticket_id: str, change_id: str) -> bool:
+    """Resume a run killed after OpenSpec archive but before Linear Done."""
+    try:
+        _buscar_directorio_archivado(change_id)
+    except RuntimeError:
+        return False
+
+    print(
+        "Cambio OpenSpec ya archivado; ejecutando gates finales "
+        "y completando Linear."
+    )
+
+    _TICKETS_CONSULTADOS.add(ticket_id)
+    _TICKETS_INICIADOS.add(ticket_id)
+    _CAMBIOS_VALIDADOS.add(change_id)
+    _CAMBIOS_ARCHIVADOS.add(change_id)
+
+    for verificacion in ("python", "lint", "test", "build"):
+        resultado = ejecutar_verificacion.func(verificacion)
+        _exigir_resultado_exitoso(
+            f"Verificación posterior al archive '{verificacion}'",
+            resultado,
+            "VERIFICACIÓN EXITOSA",
+        )
+
+    resultado_openspec = ejecutar_openspec.func("validate --all --strict")
+    _exigir_resultado_exitoso(
+        "OpenSpec validate --all --strict",
+        resultado_openspec,
+        "Éxito OpenSpec",
+    )
+
+    _CAMBIOS_VALIDADOS.add(change_id)
+    _CAMBIOS_ARCHIVADOS.add(change_id)
+    resultado_linear = completar_tarea_linear.func(ticket_id, change_id)
+    _exigir_resultado_exitoso(
+        "Completar Tarea en Linear",
+        resultado_linear,
+        f"Ticket {ticket_id} confirmado en Done.",
+    )
+    return True
+
+
 def run():
     """
     Punto de entrada principal de Koty App Crew.
@@ -112,6 +184,13 @@ def run():
             "ticket_id": ticket_id,
             "change_id": change_id,
         }
+
+        if finalizar_cambio_archivado(ticket_id, change_id):
+            print()
+            print("=" * 60)
+            print("Ejecución finalizada")
+            print("=" * 60)
+            return
 
         resultado = (
             KotyAppCrew()

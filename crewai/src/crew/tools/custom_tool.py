@@ -239,6 +239,8 @@ def _cambiar_estado_linear(
 ) -> dict[str, Any]:
     issue = _obtener_tarea_linear(ticket_id)
     estado_actual = (issue.get("state") or {}).get("name")
+    if estado_actual == estado_destino:
+        return issue
     if estado_actual not in estados_origen:
         permitidos = ", ".join(sorted(estados_origen))
         raise RuntimeError(
@@ -460,6 +462,8 @@ def _validar_comando_openspec(
         if len(argumentos) == 3 and argumentos[:2] == ["new", "change"]:
             change_id = argumentos[2]
     elif comando == "validate":
+        if argumentos == ["validate", "--all", "--strict"]:
+            return
         if (
             len(argumentos) == 4
             and argumentos[2:] == ["--strict", "--no-interactive"]
@@ -587,7 +591,7 @@ def ejecutar_openspec(
         )
 
         if resultado.returncode == 0:
-            if argumentos[0] == "validate":
+            if argumentos[0] == "validate" and argumentos[1] != "--all":
                 _CAMBIOS_VALIDADOS.add(argumentos[1])
             elif argumentos[0] == "archive":
                 _CAMBIOS_ARCHIVADOS.add(argumentos[1])

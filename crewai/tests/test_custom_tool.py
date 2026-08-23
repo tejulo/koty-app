@@ -229,6 +229,23 @@ def test_iniciar_ticket_actualiza_y_registra_evidencia(monkeypatch):
     }
 
 
+def test_iniciar_ticket_acepta_estado_in_progress_existente(monkeypatch):
+    tools_module._TICKETS_CONSULTADOS.add("DEV-5")
+    llamadas = _mock_post_secuencial(
+        monkeypatch,
+        [
+            {"data": {"issue": _issue_linear(state_name="In Progress")}},
+        ],
+    )
+
+    resultado = marcar_tarea_en_progreso_linear.func("DEV-5")
+
+    assert resultado == "Ticket DEV-5 confirmado en In Progress."
+    assert tools_module._TICKETS_INICIADOS == {"DEV-5"}
+    assert len(llamadas) == 1
+    assert "mutation IssueUpdate" not in llamadas[0]["json"]["query"]
+
+
 def test_iniciar_ticket_convierte_rechazo_en_tool_failure(monkeypatch):
     tools_module._TICKETS_CONSULTADOS.add("DEV-5")
 
@@ -253,6 +270,31 @@ def test_completar_ticket_rechaza_evidencia_incompleta():
     assert isinstance(resultado, ToolFailure)
     assert resultado.code == "COMPLETION_GATE_REJECTED"
     assert "verificaciones" in resultado.message
+
+
+def test_completar_ticket_acepta_estado_done_existente(monkeypatch, tmp_path):
+    archive = tmp_path / "openspec" / "changes" / "archive" / "2026-08-23-dev-5"
+    archive.mkdir(parents=True)
+    (archive / "tasks.md").write_text("- [x] listo\n", encoding="utf-8")
+    monkeypatch.setattr(tools_module, "PROJECT_ROOT", tmp_path)
+    tools_module._TICKETS_INICIADOS.add("DEV-5")
+    tools_module._VERIFICACIONES_EXITOSAS.update(
+        {"python", "lint", "test", "build"}
+    )
+    tools_module._CAMBIOS_VALIDADOS.add("dev-5")
+    tools_module._CAMBIOS_ARCHIVADOS.add("dev-5")
+    llamadas = _mock_post_secuencial(
+        monkeypatch,
+        [
+            {"data": {"issue": _issue_linear(state_name="Done")}},
+        ],
+    )
+
+    resultado = completar_tarea_linear.func("DEV-5", "dev-5")
+
+    assert resultado == "Ticket DEV-5 confirmado en Done."
+    assert len(llamadas) == 1
+    assert "mutation IssueUpdate" not in llamadas[0]["json"]["query"]
 
 
 def test_escritura_invalida_verificaciones(monkeypatch, tmp_path):

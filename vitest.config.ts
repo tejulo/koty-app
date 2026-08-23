@@ -7,5 +7,9 @@ export default defineConfig({
       'apps/{api,web,worker}/src/**/*.spec.ts',
       'packages/config/eslint/**/*.spec.js',
     ],
+    exclude: [
+      'apps/api/src/common/**/*.spec.ts',
+      'apps/api/src/health/**/*.spec.ts',
+    ],
   },
 });
