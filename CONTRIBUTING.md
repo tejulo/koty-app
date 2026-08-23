@@ -86,7 +86,94 @@ Consulta el `README.md` principal para las instrucciones completas de instalaci�
 
 ---
 
-# 2. Rama principal
+# 2. Development Environment Setup
+
+Esta sección documenta el procedimiento para dejar un entorno limpio completamente operativo.
+
+## 2.1 Requisitos previos del entorno
+
+Asegúrate de tener instalado:
+
+* Docker Desktop (o Docker Engine en Linux)
+* Node.js >= 20.19.0
+* pnpm >= 8.15.0
+* Python >= 3.11
+* uv
+
+## 2.2 Configurar variables de entorno
+
+1. Copia el archivo de ejemplo:
+
+```bash
+cp .env.example .env
+```
+
+2. Abre `.env` y verifica que `DATABASE_URL` tenga el valor correcto para desarrollo local:
+
+```
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/plandepo_dev
+```
+
+3. Las variables con prefijo `NEXT_PUBLIC_` son seguras para el navegador y no contienen credenciales.
+
+## 2.3 Iniciar PostgreSQL
+
+Desde la raíz del proyecto:
+
+```bash
+# Iniciar el contenedor
+pnpm db:start
+
+# Verificar que está corriendo
+pnpm db:status
+```
+
+El contenedor PostgreSQL estará disponible en `localhost:5432`.
+
+## 2.4 Detener PostgreSQL
+
+```bash
+pnpm db:stop
+```
+
+## 2.5 Verificar el entorno
+
+1. Asegúrate de que Docker está corriendo
+2. Ejecuta el bootstrap:
+
+```bash
+# Bash
+./scripts/bootstrap.sh
+
+# PowerShell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
+```
+
+3. Verifica el entorno completo:
+
+```bash
+pnpm verify
+```
+
+4. Inicia la API:
+
+```bash
+pnpm start:api
+```
+
+La API debe responder en `http://localhost:3001` y validar que `DATABASE_URL` está configurada. Si falta, mostrará un mensaje de error claro.
+
+## 2.6 Comandos de base de datos
+
+| Comando | Descripción |
+|---------|-------------|
+| `pnpm db:start` | Inicia PostgreSQL con Docker Compose |
+| `pnpm db:stop` | Detiene y elimina el contenedor |
+| `pnpm db:status` | Muestra el estado del contenedor |
+
+---
+
+# 3. Rama principal
 
 La rama principal del proyecto es:
 
@@ -112,7 +199,7 @@ En su lugar, todo cambio debe realizarse en una branch específica.
 
 ---
 
-# 3. Flujo general de desarrollo
+# 4. Flujo general de desarrollo
 
 Para cada ticket de Linear se crea una branch independiente.
 
@@ -162,7 +249,7 @@ eliminar branch
 
 ---
 
-# 4. Antes de comenzar un ticket
+# 5. Antes de comenzar un ticket
 
 Siempre comienza desde una versión actualizada de `main`.
 
@@ -187,7 +274,7 @@ Luego crea la branch correspondiente al ticket.
 
 ---
 
-# 5. Convención de nombres de branches
+# 6. Convención de nombres de branches
 
 Formato:
 
@@ -291,7 +378,7 @@ hotfix/dev-50-corregir-error-produccion
 
 ---
 
-# 6. Crear una branch
+# 7. Crear una branch
 
 Ejemplo para el ticket `DEV-5`:
 
@@ -316,7 +403,7 @@ feat/dev-5-inicializar-monorepo
 
 ---
 
-# 7. Relación entre Linear, OpenSpec y Git
+# 8. Relación entre Linear, OpenSpec y Git
 
 Los identificadores deben mantenerse relacionados.
 
@@ -358,7 +445,7 @@ Esto permite rastrear fácilmente un cambio entre las distintas herramientas.
 
 ---
 
-# 8. Flujo con CrewAI
+# 9. Flujo con CrewAI
 
 El proyecto incluye un CrewAI para automatizar:
 
@@ -396,7 +483,7 @@ main
 
 ---
 
-# 9. OpenSpec
+# 10. OpenSpec
 
 Los cambios OpenSpec se encuentran en:
 
@@ -434,7 +521,7 @@ tasks.md
 
 ---
 
-# 10. Validar OpenSpec
+# 11. Validar OpenSpec
 
 Antes de considerar terminado un cambio:
 
@@ -452,7 +539,7 @@ Si no devuelve resultados, todas las tareas están marcadas como completadas.
 
 ---
 
-# 11. Reintentar un cambio rechazado
+# 12. Reintentar un cambio rechazado
 
 Si el Reviewer rechaza un cambio, no elimines automáticamente:
 
@@ -481,7 +568,7 @@ Solo elimina el change si se decidió explícitamente rehacer toda la planificac
 
 ---
 
-# 12. Validaciones obligatorias
+# 13. Validaciones obligatorias
 
 Antes de crear un Pull Request, deben ejecutarse las validaciones del monorepo.
 
@@ -517,7 +604,7 @@ OPENSPEC_TELEMETRY=0 pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --
 
 ---
 
-# 13. Checklist antes del commit
+# 14. Checklist antes del commit
 
 Antes de crear un commit:
 
@@ -539,7 +626,7 @@ Comprueba que:
 
 ---
 
-# 14. Archivos que no deben subirse
+# 15. Archivos que no deben subirse
 
 Entre otros:
 
@@ -575,7 +662,7 @@ crewai/.env.example
 
 ---
 
-# 15. Lockfiles
+# 16. Lockfiles
 
 Los lockfiles deben versionarse.
 
@@ -595,7 +682,7 @@ No deben agregarse al `.gitignore`.
 
 ---
 
-# 16. Convención de commits
+# 17. Convención de commits
 
 Utilizamos una convención basada en Conventional Commits.
 
@@ -629,7 +716,7 @@ docs: documentar flujo de CrewAI
 
 ---
 
-# 17. Tipos de commits
+# 18. Tipos de commits
 
 ### feat
 
@@ -697,7 +784,7 @@ ci: agregar workflow de pull requests
 
 ---
 
-# 18. Scope de commits
+# 19. Scope de commits
 
 Cuando sea útil, agrega el módulo afectado:
 
@@ -713,7 +800,7 @@ No es obligatorio cuando el cambio afecta todo el proyecto.
 
 ---
 
-# 19. Crear commits
+# 20. Crear commits
 
 Revisa primero:
 
@@ -744,7 +831,7 @@ git commit -m "feat: inicializar estructura del monorepo"
 
 ---
 
-# 20. Commits pequeños
+# 21. Commits pequeños
 
 Se prefieren commits pequeños y coherentes.
 
@@ -773,7 +860,7 @@ test
 
 ---
 
-# 21. Subir la branch
+# 22. Subir la branch
 
 La primera vez:
 
@@ -789,7 +876,7 @@ git push
 
 ---
 
-# 22. Pull Requests
+# 23. Pull Requests
 
 Cada branch debe integrarse a `main` mediante Pull Request.
 
@@ -805,7 +892,7 @@ feat/dev-5-inicializar-monorepo
 
 ---
 
-# 23. Convención de títulos de Pull Request
+# 24. Convención de títulos de Pull Request
 
 Formato:
 
@@ -828,7 +915,7 @@ Otros ejemplos:
 
 ---
 
-# 24. Contenido recomendado del Pull Request
+# 25. Contenido recomendado del Pull Request
 
 Cada Pull Request debería incluir:
 
@@ -861,7 +948,7 @@ Resumen del cambio implementado.
 
 ---
 
-# 25. Revisión antes del PR
+# 26. Revisión antes del PR
 
 Ejecuta:
 
@@ -879,7 +966,7 @@ git diff main...HEAD
 
 ---
 
-# 26. Merge
+# 27. Merge
 
 Un Pull Request puede integrarse a `main` cuando:
 
@@ -891,7 +978,7 @@ Un Pull Request puede integrarse a `main` cuando:
 
 ---
 
-# 27. Estrategia recomendada de merge
+# 28. Estrategia recomendada de merge
 
 Para branches de features normales se recomienda:
 
@@ -920,7 +1007,7 @@ Esto mantiene `main` más limpio.
 
 ---
 
-# 28. Después del merge
+# 29. Después del merge
 
 Actualiza `main`:
 
@@ -943,7 +1030,7 @@ git push origin --delete feat/dev-5-inicializar-monorepo
 
 ---
 
-# 29. Comenzar el siguiente ticket
+# 30. Comenzar el siguiente ticket
 
 Ejemplo:
 
@@ -963,7 +1050,7 @@ uv run run_crew dev-6
 
 ---
 
-# 30. Mantener una branch actualizada
+# 31. Mantener una branch actualizada
 
 Si `main` cambia mientras trabajas:
 
@@ -993,7 +1080,7 @@ antes de abrir o actualizar el PR.
 
 ---
 
-# 31. Conflictos durante rebase
+# 32. Conflictos durante rebase
 
 Si aparece un conflicto:
 
@@ -1034,7 +1121,7 @@ salvo un caso excepcional.
 
 ---
 
-# 32. Hotfixes
+# 33. Hotfixes
 
 Para una corrección urgente:
 
@@ -1061,7 +1148,7 @@ No se deben saltar las validaciones por tratarse de un hotfix.
 
 ---
 
-# 33. Cambios sin ticket
+# 34. Cambios sin ticket
 
 Siempre que sea posible, todo cambio debe estar asociado a un ticket.
 
@@ -1077,7 +1164,7 @@ Esto mantiene la trazabilidad.
 
 ---
 
-# 34. No mezclar tickets
+# 35. No mezclar tickets
 
 Una branch debe corresponder principalmente a un ticket.
 
@@ -1099,7 +1186,7 @@ Si aparece trabajo adicional, crea otro ticket y otra branch.
 
 ---
 
-# 35. No desarrollar sobre branches de otros tickets
+# 36. No desarrollar sobre branches de otros tickets
 
 Evita:
 
@@ -1125,7 +1212,7 @@ Esto reduce dependencias entre Pull Requests.
 
 ---
 
-# 36. Branches dependientes
+# 37. Branches dependientes
 
 Si un ticket depende realmente de otro aún no mergeado, documenta claramente esa dependencia en el Pull Request.
 
@@ -1143,7 +1230,7 @@ Cuando `DEV-5` llegue a `main`, actualiza `DEV-6` mediante rebase.
 
 ---
 
-# 37. Cambios generados por CrewAI
+# 38. Cambios generados por CrewAI
 
 CrewAI puede modificar muchos archivos.
 
@@ -1160,7 +1247,7 @@ La revisión humana del diff sigue siendo necesaria.
 
 ---
 
-# 38. OpenSpec y Git
+# 39. OpenSpec y Git
 
 Los cambios OpenSpec forman parte del repositorio.
 
@@ -1181,7 +1268,7 @@ Los artifacts de OpenSpec permiten entender por qué existe una implementación 
 
 ---
 
-# 39. CrewAI y Git
+# 40. CrewAI y Git
 
 Versionar:
 
@@ -1203,7 +1290,7 @@ crewai/**/__pycache__/
 
 ---
 
-# 40. Definition of Done
+# 41. Definition of Done
 
 Un ticket se considera terminado cuando:
 
@@ -1222,7 +1309,7 @@ Un ticket se considera terminado cuando:
 
 ---
 
-# 41. Resumen rápido
+# 42. Resumen rápido
 
 Para un ticket activo, por ejemplo:
 

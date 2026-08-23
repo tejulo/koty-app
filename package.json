@@ -19,7 +19,10 @@
     "clean": "pnpm -r --filter=./** clean",
     "start:web": "pnpm --filter @koty-app/web start",
     "start:api": "pnpm --filter @koty-app/api start",
-    "start:worker": "pnpm --filter @koty-app/worker start"
+    "start:worker": "pnpm --filter @koty-app/worker start",
+    "db:start": "docker compose up -d",
+    "db:stop": "docker compose down",
+    "db:status": "docker compose ps"
   },
   "devDependencies": {
     "@fission-ai/openspec": "1.4.1",
