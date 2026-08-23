@@ -33,7 +33,9 @@ Antes de comenzar a trabajar en el proyecto, asegúrate de tener instalados:
 * Python
 * uv
 
-Las versiones de Node.js, pnpm, Python y uv estan fijadas en `.mise.toml`. Desde la raiz, prepara y verifica el entorno con:
+Las versiones de Node.js, pnpm, Python y uv estan fijadas en `.mise.toml`. Desde la raiz, prepara y verifica el entorno con el flujo correspondiente.
+
+### Bash (Linux, macOS y WSL)
 
 ```bash
 ./scripts/bootstrap.sh
@@ -45,9 +47,25 @@ cd crewai
 uv run run_crew DEV-5
 ```
 
+### PowerShell 5.1 o 7 (Windows)
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
+# ejecutar las instrucciones que imprime para activar mise en este shell
+# completar crewai\.env
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
+pnpm verify
+Set-Location crewai
+uv run run_crew DEV-5
+```
+
+En PowerShell 7, sustituye `powershell.exe` por `pwsh` en ambos comandos.
+
 `bootstrap.sh` instala `mise` cuando hace falta, instala las versiones fijadas, sincroniza las dependencias pnpm y uv con sus lockfiles y crea `crewai/.env` desde el ejemplo solo si no existe. Ejecuta `doctor.sh` al final, por lo que puede devolver un codigo distinto de cero hasta que se completen las credenciales y modelos requeridos; despues debe repetirse `./scripts/doctor.sh`.
 
 El bootstrap no puede modificar el shell padre. Cuando termina correctamente imprime instrucciones idempotentes para agregar `~/.local/bin` y activar `mise` en Bash o Zsh. Ejecuta ese bloque antes de usar cualquier comando bare `pnpm` o `uv` de esta guia.
+
+En Windows, `bootstrap.ps1` instala `mise` mediante `winget` si es necesario e imprime el bloque idempotente para activar `mise` en PowerShell 5.1 o 7. Si `winget` acaba de instalar `mise` y no aparece en `PATH`, abre una nueva sesion y ejecuta nuevamente el bootstrap.
 
 Si no quieres modificar la configuracion del shell, usa la ruta resuelta que muestra el bootstrap:
 
@@ -62,7 +80,7 @@ No requiere activacion manual de `crewai/.venv`: usa `uv run`. OpenSpec es local
 
 `DEV-5` esta archivado. El comando del flujo documenta el formato del entrypoint; si la ejecucion puede crear, modificar o archivar artefactos, sustituye `DEV-5` por un ticket activo.
 
-Los ejemplos operativos usan `TICKET_ACTIVO` y `CHANGE_ID_ACTIVO`. Asigna los identificadores reales antes de ejecutarlos, por ejemplo `export TICKET_ACTIVO=DEV-123` y `export CHANGE_ID_ACTIVO=dev-123`.
+Los ejemplos operativos usan `TICKET_ACTIVO` y `CHANGE_ID_ACTIVO`. En Bash, asigna los identificadores reales con `export TICKET_ACTIVO=DEV-123` y `export CHANGE_ID_ACTIVO=dev-123`; en PowerShell usa `$env:TICKET_ACTIVO = 'DEV-123'` y `$env:CHANGE_ID_ACTIVO = 'dev-123'`.
 
 Consulta el `README.md` principal para las instrucciones completas de instalación.
 

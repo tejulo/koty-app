@@ -38,7 +38,9 @@ Antes de utilizar este módulo debes tener instalados:
 * Node.js
 * pnpm
 
-Las versiones del proyecto estan fijadas en `../.mise.toml`. Desde la raiz del monorepo, el flujo completo es:
+Las versiones del proyecto estan fijadas en `../.mise.toml`. Desde la raiz del monorepo, usa el flujo de tu shell.
+
+### Bash (Linux, macOS y WSL)
 
 ```bash
 ./scripts/bootstrap.sh
@@ -50,9 +52,25 @@ cd crewai
 uv run run_crew DEV-5
 ```
 
+### PowerShell 5.1 o 7 (Windows)
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
+# ejecutar las instrucciones que imprime para activar mise en este shell
+# completar crewai\.env
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
+pnpm verify
+Set-Location crewai
+uv run run_crew DEV-5
+```
+
+En PowerShell 7, sustituye `powershell.exe` por `pwsh` en ambos comandos.
+
 `bootstrap.sh` instala `mise` cuando hace falta, instala las versiones fijadas, sincroniza pnpm y uv con sus lockfiles y crea `crewai/.env` desde `.env.example` solo si no existe. Como ejecuta `doctor.sh` al final, puede devolver un codigo distinto de cero mientras falten credenciales o modelos en `crewai/.env`; completa esos valores y ejecuta nuevamente `./scripts/doctor.sh`.
 
 El bootstrap no puede modificar el shell padre. Cuando termina correctamente imprime un bloque idempotente para agregar `~/.local/bin` y activar `mise` en Bash o Zsh. Los comandos bare `pnpm` y `uv` de este documento presuponen que ese bloque ya se ejecuto en la terminal actual.
+
+En Windows, `bootstrap.ps1` instala `mise` mediante `winget` si es necesario y emite el bloque de activacion para PowerShell 5.1 o 7. Si `winget` acaba de instalar `mise`, abre una nueva sesion si el comando todavia no esta disponible.
 
 Como alternativa sin modificar el shell, usa la ruta resuelta que muestra el bootstrap:
 
@@ -68,6 +86,8 @@ No se requiere activar manualmente `.venv`: los comandos `uv run` usan el entorn
 `DEV-5` esta archivado en `openspec/changes/archive/2026-08-18-dev-5/`. El comando del flujo muestra el formato aceptado; una ejecucion que pueda modificar o archivar artefactos debe usar un ticket activo.
 
 Los ejemplos siguientes usan `TICKET_ACTIVO` y `CHANGE_ID_ACTIVO`. Antes de ejecutarlos, asigna el identificador real, por ejemplo `export TICKET_ACTIVO=DEV-123` y `export CHANGE_ID_ACTIVO=dev-123`.
+
+En PowerShell, usa `$env:TICKET_ACTIVO = 'DEV-123'` y `$env:CHANGE_ID_ACTIVO = 'dev-123'`.
 
 ---
 
@@ -954,7 +974,7 @@ git clone <REPOSITORIO>
 cd koty-app
 ```
 
-Preparar, completar credenciales, diagnosticar y verificar:
+Preparar, completar credenciales, diagnosticar y verificar en Bash (Linux, macOS o WSL):
 
 ```bash
 ./scripts/bootstrap.sh
@@ -967,6 +987,8 @@ uv run run_crew DEV-5
 ```
 
 El ultimo comando muestra el formato del entrypoint. Para una ejecucion que cambie artefactos, usa un ticket activo en lugar de `DEV-5`.
+
+En Windows, usa el bloque PowerShell de requisitos al inicio de este documento.
 
 ---
 
