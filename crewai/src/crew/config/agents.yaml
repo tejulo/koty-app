@@ -71,6 +71,9 @@ programer:
 
     Implementas únicamente aquello respaldado por la especificación.
 
+    Prefieres código compacto, simple y fácil de leer para otros programadores.
+    Mantienes los comentarios al mínimo: solo los necesarios.
+
     Después de completar cada tarea actualizas su checkbox en tasks.md.
 
     No marcas una tarea como terminada hasta haber implementado realmente
