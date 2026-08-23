@@ -1,5 +1,6 @@
 import os
 import subprocess
+from typing import Any
 
 import pytest
 from crewai.tools.tool_failure import ToolFailure
@@ -12,6 +13,52 @@ from crew.tools.custom_tool import (
     ejecutar_openspec,
     marcar_tarea_en_progreso_linear,
 )
+
+
+class _RespuestaLinear:
+    def __init__(self, payload: dict[str, Any]):
+        self.payload = payload
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self) -> dict[str, Any]:
+        return self.payload
+
+
+def _issue_linear(
+    *,
+    state_name: str,
+    team_key: str = "DEV",
+    project_name: str = "koty-app",
+) -> dict[str, Any]:
+    return {
+        "id": "issue-123",
+        "identifier": "DEV-5",
+        "title": "Probar protocolo Linear",
+        "description": "Cubre la transición protegida.",
+        "priority": 3,
+        "priorityLabel": "Medium",
+        "state": {"id": "backlog-state", "name": state_name},
+        "project": {"id": "project-123", "name": project_name},
+        "team": {"id": "team-123", "key": team_key, "name": "Dev"},
+    }
+
+
+def _mock_post_secuencial(
+    monkeypatch: pytest.MonkeyPatch,
+    respuestas: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    llamadas: list[dict[str, Any]] = []
+    pendientes = iter(respuestas)
+
+    def post(url: str, **kwargs: Any) -> _RespuestaLinear:
+        llamadas.append({"url": url, **kwargs})
+        return _RespuestaLinear(next(pendientes))
+
+    monkeypatch.setenv("LINEAR_API_KEY", "linear-test-key")
+    monkeypatch.setattr(tools_module.requests, "post", post)
+    return llamadas
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +74,125 @@ def limpiar_evidencia_linear():
     tools_module._VERIFICACIONES_EXITOSAS.clear()
     tools_module._CAMBIOS_VALIDADOS.clear()
     tools_module._CAMBIOS_ARCHIVADOS.clear()
+
+
+def test_cambiar_estado_linear_lee_actualiza_y_confirma_estado(monkeypatch):
+    llamadas = _mock_post_secuencial(
+        monkeypatch,
+        [
+            {"data": {"issue": _issue_linear(state_name="Backlog")}},
+            {"data": {"issueUpdate": {"success": True}}},
+            {"data": {"issue": _issue_linear(state_name="In Progress")}},
+        ],
+    )
+
+    actualizado = tools_module._cambiar_estado_linear(
+        "DEV-5",
+        {"Backlog", "Todo"},
+        tools_module.LINEAR_IN_PROGRESS_STATE_ID,
+        "In Progress",
+    )
+
+    assert actualizado["state"]["name"] == "In Progress"
+    assert len(llamadas) == 3
+    assert all(llamada["url"] == tools_module.LINEAR_URL for llamada in llamadas)
+    assert "query Issue" in llamadas[0]["json"]["query"]
+    assert llamadas[0]["json"]["variables"] == {"id": "DEV-5"}
+    assert "mutation IssueUpdate" in llamadas[1]["json"]["query"]
+    assert "input: {stateId: $stateId}" in llamadas[1]["json"]["query"]
+    assert llamadas[1]["json"]["variables"] == {
+        "id": "DEV-5",
+        "stateId": tools_module.LINEAR_IN_PROGRESS_STATE_ID,
+    }
+    assert "query Issue" in llamadas[2]["json"]["query"]
+    assert llamadas[2]["json"]["variables"] == {"id": "DEV-5"}
+    assert [
+        llamada["json"]["variables"].get("stateId")
+        for llamada in llamadas
+        if "stateId" in llamada["json"]["variables"]
+    ] == [tools_module.LINEAR_IN_PROGRESS_STATE_ID]
+
+
+@pytest.mark.parametrize(
+    ("team_key", "project_name"),
+    [("OPS", "koty-app"), ("DEV", "otro-proyecto")],
+)
+def test_cambiar_estado_linear_rechaza_scope_antes_de_mutar(
+    monkeypatch,
+    team_key,
+    project_name,
+):
+    llamadas = _mock_post_secuencial(
+        monkeypatch,
+        [
+            {
+                "data": {
+                    "issue": _issue_linear(
+                        state_name="Backlog",
+                        team_key=team_key,
+                        project_name=project_name,
+                    )
+                }
+            }
+        ],
+    )
+
+    with pytest.raises(RuntimeError):
+        tools_module._cambiar_estado_linear(
+            "DEV-5",
+            {"Backlog", "Todo"},
+            tools_module.LINEAR_IN_PROGRESS_STATE_ID,
+            "In Progress",
+        )
+
+    assert len(llamadas) == 1
+    assert "issueUpdate" not in llamadas[0]["json"]["query"]
+
+
+def test_cambiar_estado_linear_rechaza_estado_origen_invalido_antes_de_mutar(
+    monkeypatch,
+):
+    llamadas = _mock_post_secuencial(
+        monkeypatch,
+        [{"data": {"issue": _issue_linear(state_name="Canceled")}}],
+    )
+
+    with pytest.raises(RuntimeError, match="Canceled"):
+        tools_module._cambiar_estado_linear(
+            "DEV-5",
+            {"Backlog", "Todo"},
+            tools_module.LINEAR_IN_PROGRESS_STATE_ID,
+            "In Progress",
+        )
+
+    assert len(llamadas) == 1
+    assert "issueUpdate" not in llamadas[0]["json"]["query"]
+
+
+def test_cambiar_estado_linear_rechaza_postcondicion_de_estado(monkeypatch):
+    llamadas = _mock_post_secuencial(
+        monkeypatch,
+        [
+            {"data": {"issue": _issue_linear(state_name="Backlog")}},
+            {"data": {"issueUpdate": {"success": True}}},
+            {"data": {"issue": _issue_linear(state_name="Todo")}},
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="postcondición"):
+        tools_module._cambiar_estado_linear(
+            "DEV-5",
+            {"Backlog", "Todo"},
+            tools_module.LINEAR_IN_PROGRESS_STATE_ID,
+            "In Progress",
+        )
+
+    assert len(llamadas) == 3
+    assert "mutation IssueUpdate" in llamadas[1]["json"]["query"]
+    assert llamadas[1]["json"]["variables"] == {
+        "id": "DEV-5",
+        "stateId": tools_module.LINEAR_IN_PROGRESS_STATE_ID,
+    }
 
 
 def test_iniciar_ticket_exige_busqueda_previa():
