@@ -173,6 +173,9 @@ LINEAR_DONE_STATE_ID = "10a67bb1-f5aa-4fe6-ae85-213f792d5a48"
 
 _TICKETS_CONSULTADOS: set[str] = set()
 _TICKETS_INICIADOS: set[str] = set()
+_VERIFICACIONES_EXITOSAS: set[str] = set()
+_CAMBIOS_VALIDADOS: set[str] = set()
+_CAMBIOS_ARCHIVADOS: set[str] = set()
 
 
 def _normalizar_ticket_id(ticket_id: str) -> str:
@@ -372,6 +375,67 @@ def marcar_tarea_en_progreso_linear(ticket_id: str) -> str | ToolFailure:
         )
 
 
+def _buscar_directorio_archivado(change_id: str) -> Path:
+    activos = PROJECT_ROOT / "openspec" / "changes" / change_id
+    if activos.exists():
+        raise RuntimeError("El cambio OpenSpec todavía está activo.")
+
+    archive_root = PROJECT_ROOT / "openspec" / "changes" / "archive"
+    candidatos = sorted(archive_root.glob(f"*-{change_id}"))
+    if len(candidatos) != 1 or not candidatos[0].is_dir():
+        raise RuntimeError("No existe un único archive confirmado para el cambio.")
+
+    tasks_path = candidatos[0] / "tasks.md"
+    if not tasks_path.is_file():
+        raise RuntimeError("El archive no contiene tasks.md.")
+    tasks = tasks_path.read_text(encoding="utf-8")
+    if re.search(r"^\s*-\s*\[ \]", tasks, flags=re.MULTILINE):
+        raise RuntimeError("El archive conserva tareas pendientes.")
+    return candidatos[0]
+
+
+@tool("Completar Tarea en Linear")
+def completar_tarea_linear(
+    ticket_id: str,
+    change_id: str,
+) -> str | ToolFailure:
+    """Moves the current ticket to Done only after all local completion gates pass."""
+    try:
+        normalizado = _normalizar_ticket_id(ticket_id)
+        if normalizado not in _TICKETS_INICIADOS:
+            raise RuntimeError("Este proceso no inició el ticket indicado.")
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", change_id):
+            raise RuntimeError("El change-id no usa kebab-case válido.")
+        if change_id != normalizado.lower():
+            raise RuntimeError("El change-id no corresponde al ticket iniciado.")
+
+        requeridas = {"python", "lint", "test", "build"}
+        faltantes = sorted(requeridas - _VERIFICACIONES_EXITOSAS)
+        if faltantes:
+            raise RuntimeError(
+                "Faltan verificaciones exitosas: " + ", ".join(faltantes)
+            )
+        if change_id not in _CAMBIOS_VALIDADOS:
+            raise RuntimeError("Falta OpenSpec validate exitoso vigente.")
+        if change_id not in _CAMBIOS_ARCHIVADOS:
+            raise RuntimeError("Falta OpenSpec archive exitoso.")
+
+        _buscar_directorio_archivado(change_id)
+        _cambiar_estado_linear(
+            normalizado,
+            {"In Progress"},
+            LINEAR_DONE_STATE_ID,
+            "Done",
+        )
+        return f"Ticket {normalizado} confirmado en Done."
+    except Exception as error:
+        return ToolFailure(
+            message=str(error),
+            code="COMPLETION_GATE_REJECTED",
+            retryable=False,
+        )
+
+
 # ============================================================
 # OpenSpec
 # ============================================================
@@ -439,7 +503,7 @@ def _validar_comando_openspec(
 @tool("Ejecutar OpenSpec")
 def ejecutar_openspec(
     comando_openspec: str,
-) -> str:
+) -> str | ToolFailure:
     """
     Ejecuta OpenSpec desde la raíz del repositorio.
 
@@ -462,6 +526,16 @@ def ejecutar_openspec(
         _validar_comando_openspec(
             argumentos
         )
+
+        if (
+            argumentos[0] == "archive"
+            and argumentos[1] not in _CAMBIOS_VALIDADOS
+        ):
+            return ToolFailure(
+                message="El cambio debe validarse antes de archivarse.",
+                code="CHANGE_NOT_VALIDATED",
+                retryable=False,
+            )
 
         resultado = subprocess.run(
             [
@@ -513,11 +587,19 @@ def ejecutar_openspec(
         )
 
         if resultado.returncode == 0:
+            if argumentos[0] == "validate":
+                _CAMBIOS_VALIDADOS.add(argumentos[1])
+            elif argumentos[0] == "archive":
+                _CAMBIOS_ARCHIVADOS.add(argumentos[1])
             return (
                 "Éxito OpenSpec\n\n"
                 + salida
             )
 
+        if argumentos[0] == "validate" and len(argumentos) > 1:
+            _CAMBIOS_VALIDADOS.discard(argumentos[1])
+        if argumentos[0] == "archive" and len(argumentos) > 1:
+            _CAMBIOS_ARCHIVADOS.discard(argumentos[1])
         return (
             "Error de OpenSpec\n\n"
             + salida
@@ -554,6 +636,15 @@ def ejecutar_openspec(
 # Escritura
 # ============================================================
 
+def _invalidar_evidencia_por_escritura(ruta: Path) -> None:
+    _VERIFICACIONES_EXITOSAS.clear()
+    partes = ruta.relative_to(PROJECT_ROOT).parts
+    if len(partes) >= 3 and partes[:2] == ("openspec", "changes"):
+        change_id = partes[2]
+        if change_id != "archive":
+            _CAMBIOS_VALIDADOS.discard(change_id)
+            _CAMBIOS_ARCHIVADOS.discard(change_id)
+
 @tool("Escribir Archivo en Raiz")
 def escribir_archivo_raiz(
     ruta_relativa: str,
@@ -580,6 +671,7 @@ def escribir_archivo_raiz(
             contenido,
             encoding="utf-8",
         )
+        _invalidar_evidencia_por_escritura(ruta)
 
         # Importante:
         #
@@ -923,11 +1015,13 @@ def ejecutar_verificacion(
         )
 
         if resultado.returncode == 0:
+            _VERIFICACIONES_EXITOSAS.add(nombre)
             return (
                 "VERIFICACIÓN EXITOSA\n\n"
                 + salida
             )
 
+        _VERIFICACIONES_EXITOSAS.discard(nombre)
         return (
             "VERIFICACIÓN FALLIDA\n\n"
             + salida
