@@ -7,7 +7,18 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $miseCommand = $null
 
+function Update-ProcessPath {
+    $pathEntries = @(
+        $env:PATH
+        [Environment]::GetEnvironmentVariable('Path', 'User')
+        [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    $env:PATH = $pathEntries -join ';'
+}
+
 if ([string]::IsNullOrWhiteSpace($MisePath)) {
+    Update-ProcessPath
     $miseCommand = Get-Command mise -ErrorAction SilentlyContinue
 
     if ($null -eq $miseCommand) {
@@ -17,11 +28,13 @@ if ([string]::IsNullOrWhiteSpace($MisePath)) {
         }
 
         & $wingetCommand.Source install --id jdx.mise --exact --accept-package-agreements --accept-source-agreements
-        if ($LASTEXITCODE -ne 0) {
-            throw "winget could not install mise (exit code $LASTEXITCODE)."
+        $wingetStatus = $LASTEXITCODE
+        Update-ProcessPath
+        $miseCommand = Get-Command mise -ErrorAction SilentlyContinue
+        if ($null -eq $miseCommand -and $wingetStatus -ne 0) {
+            throw "winget could not install mise (exit code $wingetStatus)."
         }
 
-        $miseCommand = Get-Command mise -ErrorAction SilentlyContinue
         if ($null -eq $miseCommand) {
             $wingetLink = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\mise.exe'
             if (Test-Path -LiteralPath $wingetLink) {
@@ -39,17 +52,20 @@ if ([string]::IsNullOrWhiteSpace($MisePath)) {
 
 Set-Location -LiteralPath $repositoryRoot
 
-& $misePath install
+# Equivalent native call: & $misePath install
+& $misePath @('install')
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-& $misePath exec -- pnpm install --frozen-lockfile
+$pnpmInstallCommand = 'pnpm install --frozen-lockfile'.Split(' ')
+& $misePath (@('exec', '--') + $pnpmInstallCommand)
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-& $misePath exec -- uv sync --project crewai --frozen
+$uvSyncCommand = 'uv sync --project crewai --frozen'.Split(' ')
+& $misePath (@('exec', '--') + $uvSyncCommand)
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

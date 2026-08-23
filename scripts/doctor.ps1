@@ -15,19 +15,47 @@ function Report-Error {
     $script:failed = $true
 }
 
+function Update-ProcessPath {
+    $pathEntries = @(
+        $env:PATH
+        [Environment]::GetEnvironmentVariable('Path', 'User')
+        [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    $env:PATH = $pathEntries -join ';'
+}
+
+function Invoke-MiseCapture {
+    param([string[]]$Arguments)
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $script:misePath @Arguments 2>$null
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    [pscustomobject]@{
+        ExitCode = $exitCode
+        Output = ($output -join "`n").Trim()
+    }
+}
+
 function Test-Version {
     param(
         [string]$Tool,
         [string]$Expected
     )
 
-    $output = & $script:misePath exec -- $Tool --version 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    $result = Invoke-MiseCapture @('exec', '--', $Tool, '--version')
+    if ($result.ExitCode -ne 0) {
         Report-Error "$Tool version check failed"
         return
     }
 
-    $actual = (($output -join "`n").Trim())
+    $actual = $result.Output
     switch ($Tool) {
         'node' { $actual = $actual.TrimStart('v') }
         'python' { $actual = $actual -replace '^Python\s+', '' }
@@ -47,8 +75,8 @@ function Test-Command {
         [string[]]$Arguments
     )
 
-    & $script:misePath @Arguments *> $null
-    if ($LASTEXITCODE -ne 0) {
+    $result = Invoke-MiseCapture $Arguments
+    if ($result.ExitCode -ne 0) {
         Report-Error "$Message failed"
     } else {
         Write-Host "OK: $Message"
@@ -58,6 +86,7 @@ function Test-Command {
 if (-not [string]::IsNullOrWhiteSpace($MisePath)) {
     $script:misePath = $MisePath
 } else {
+    Update-ProcessPath
     $miseCommand = Get-Command mise -ErrorAction SilentlyContinue
     if ($null -ne $miseCommand) {
         $script:misePath = $miseCommand.Source
@@ -83,29 +112,12 @@ if (-not $script:failed) {
     if (-not (Test-Path -LiteralPath $environmentPath)) {
         Report-Error 'missing environment file: crewai/.env'
     } else {
-        $parser = @'
-import sys
-from dotenv import dotenv_values
-
-required = (
-    "LINEAR_API_KEY",
-    "OPENCODE_API_KEY",
-    "ZEN_BASE_URL",
-    "ZEN_ANALYST_MODEL",
-    "ZEN_ARCHITECT_MODEL",
-    "ZEN_CODER_MODEL",
-    "ZEN_REVIEWER_MODEL",
-)
-values = dotenv_values(sys.argv[1])
-for key in required:
-    if not values.get(key):
-        print(key)
-'@
-        $missing = @(& $script:misePath exec -- uv run --project crewai --no-sync python -c $parser $environmentPath 2>$null)
-        if ($LASTEXITCODE -ne 0) {
+        $parser = "import sys; from dotenv import dotenv_values; required = ('LINEAR_API_KEY', 'OPENCODE_API_KEY', 'ZEN_BASE_URL', 'ZEN_ANALYST_MODEL', 'ZEN_ARCHITECT_MODEL', 'ZEN_CODER_MODEL', 'ZEN_REVIEWER_MODEL'); values = dotenv_values(sys.argv[1]); [print(key) for key in required if not values.get(key)]"
+        $result = Invoke-MiseCapture @('exec', '--', 'uv', 'run', '--project', 'crewai', '--no-sync', 'python', '-c', $parser, $environmentPath)
+        if ($result.ExitCode -ne 0) {
             Report-Error 'environment file validation failed'
         } else {
-            foreach ($key in $missing) {
+            foreach ($key in $result.Output -split "`r?`n") {
                 if (-not [string]::IsNullOrWhiteSpace($key)) {
                     Report-Error "empty environment variable: $key"
                 }
@@ -113,37 +125,20 @@ for key in required:
         }
     }
 
-    & $script:misePath exec -- pnpm install --frozen-lockfile --lockfile-only *> $null
-    if ($LASTEXITCODE -ne 0) {
-        Report-Error 'pnpm frozen lockfile check failed'
-    } else {
-        Write-Host 'OK: pnpm frozen lockfile check'
-    }
-
-    & $script:misePath exec -- uv lock --project crewai --check *> $null
-    if ($LASTEXITCODE -ne 0) {
-        Report-Error 'uv lock check failed'
-    } else {
-        Write-Host 'OK: uv lock check'
-    }
+    $pnpmLockfileCommand = 'pnpm install --frozen-lockfile --lockfile-only'.Split(' ')
+    $uvLockCommand = 'uv lock --project crewai --check'.Split(' ')
+    Test-Command 'pnpm frozen lockfile check' (@('exec', '--') + $pnpmLockfileCommand)
+    Test-Command 'uv lock check' (@('exec', '--') + $uvLockCommand)
 
     $previousTelemetry = $env:OPENSPEC_TELEMETRY
     $env:OPENSPEC_TELEMETRY = '0'
-    & $script:misePath exec -- pnpm exec openspec validate --all --strict *> $null
-    $openspecExitCode = $LASTEXITCODE
-    $env:OPENSPEC_TELEMETRY = $previousTelemetry
-    if ($openspecExitCode -ne 0) {
-        Report-Error 'OpenSpec strict validation failed'
-    } else {
-        Write-Host 'OK: OpenSpec strict validation'
+    try {
+        Test-Command 'OpenSpec strict validation' @('exec', '--', 'pnpm', 'exec', 'openspec', 'validate', '--all', '--strict')
+    } finally {
+        $env:OPENSPEC_TELEMETRY = $previousTelemetry
     }
 
-    & $script:misePath exec -- uv run --project crewai --no-sync python -c "import crew; print('crew import ok')" *> $null
-    if ($LASTEXITCODE -ne 0) {
-        Report-Error 'crew import failed'
-    } else {
-        Write-Host 'OK: crew import'
-    }
+    Test-Command 'crew import' @('exec', '--', 'uv', 'run', '--project', 'crewai', '--no-sync', 'python', '-c', "import crew; print('crew import ok')")
 }
 
 if ($script:failed) {
