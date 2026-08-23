@@ -1,7 +1,16 @@
 analysis_task:
   description: >
-    Usa obligatoriamente 'Buscar Tarea en Linear'
-    para obtener el ticket '{ticket_id}'.
+    PASO 1:
+    Usa obligatoriamente 'Buscar Tarea en Linear' para obtener
+    el ticket '{ticket_id}'.
+
+    PASO 2:
+    Inmediatamente después usa 'Marcar Tarea en Progreso' con
+    ticket_id='{ticket_id}'. No continúes si Linear no confirma
+    el estado In Progress.
+
+    PASO 3:
+    Analiza el contenido recuperado.
 
     Analiza:
     - título;
@@ -27,7 +36,7 @@ analysis_task:
   expected_output: >
     Resumen estructurado y conciso del ticket '{ticket_id}'
     con objetivo, alcance, requisitos, criterios de aceptación,
-    restricciones y ambigüedades.
+    restricciones, ambigüedades y confirmación real de In Progress.
 
   agent: analyst
 
@@ -292,8 +301,19 @@ review_task:
     archive {change_id} --yes
 
     PASO 7:
-    Nunca inventes una confirmación de archivado.
-    Usa el resultado real devuelto por OpenSpec.
+    Verifica el resultado real del archive. Después vuelve a ejecutar
+    'Ejecutar Verificacion' para python, lint, test y build, porque archive
+    modifica archivos del repositorio.
+
+    PASO 8:
+    Solo si esas verificaciones posteriores al archive fueron exitosas usa
+    'Completar Tarea en Linear' con ticket_id='{ticket_id}' y
+    change_id='{change_id}'. Esta debe ser tu última acción.
+
+    Si Linear no confirma Done, la revisión queda rechazada.
+
+    Nunca inventes una confirmación de archivado o Done.
+    Usa los resultados reales devueltos por OpenSpec y Linear.
 
     IMPORTANTE:
     Tu respuesta final debe ser breve.
@@ -303,6 +323,6 @@ review_task:
   expected_output: >
     Informe breve indicando si la revisión fue aprobada
     o rechazada. Si fue aprobada, incluye el resultado
-    real del archivado OpenSpec.
+    real del archivado OpenSpec y la confirmación real de Done.
 
   agent: reviewer

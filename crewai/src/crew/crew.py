@@ -18,6 +18,7 @@ from crewai import (
     Process,
     Task,
 )
+from crewai.tools.tool_failure import ToolFailurePolicy
 
 from crewai.project import (
     CrewBase,
@@ -28,11 +29,13 @@ from crewai.project import (
 
 from .tools.custom_tool import (
     buscar_tarea_linear,
+    completar_tarea_linear,
     ejecutar_openspec,
     ejecutar_verificacion,
     escribir_archivo_raiz,
     leer_archivo_raiz,
     listar_archivos_raiz,
+    marcar_tarea_en_progreso_linear,
 )
 
 
@@ -103,7 +106,7 @@ class KotyAppCrew:
         return Agent(
             config=self.agents_config[
                 "analyst"
-            ],
+            ],  # type: ignore[index]
             llm=_zen_llm(
                 "ZEN_ANALYST_MODEL"
             ),
@@ -118,7 +121,9 @@ class KotyAppCrew:
 
             tools=[
                 buscar_tarea_linear,
+                marcar_tarea_en_progreso_linear,
             ],
+            tool_failure_policy=ToolFailurePolicy.RAISE,
         )
 
     @agent
@@ -126,7 +131,7 @@ class KotyAppCrew:
         return Agent(
             config=self.agents_config[
                 "arquitect"
-            ],
+            ],  # type: ignore[index]
             llm=_zen_llm(
                 "ZEN_ARCHITECT_MODEL"
             ),
@@ -151,7 +156,7 @@ class KotyAppCrew:
         return Agent(
             config=self.agents_config[
                 "programer"
-            ],
+            ],  # type: ignore[index]
             llm=_zen_llm(
                 "ZEN_CODER_MODEL"
             ),
@@ -174,7 +179,7 @@ class KotyAppCrew:
         return Agent(
             config=self.agents_config[
                 "reviewer"
-            ],
+            ],  # type: ignore[index]
             llm=_zen_llm(
                 "ZEN_REVIEWER_MODEL"
             ),
@@ -189,7 +194,9 @@ class KotyAppCrew:
                 listar_archivos_raiz,
                 ejecutar_openspec,
                 ejecutar_verificacion,
+                completar_tarea_linear,
             ],
+            tool_failure_policy=ToolFailurePolicy.RAISE,
         )
 
     # ========================================================
@@ -201,7 +208,7 @@ class KotyAppCrew:
         return Task(
             config=self.tasks_config[
                 "analysis_task"
-            ]
+            ]  # type: ignore[index]
         )
 
     @task
@@ -209,7 +216,7 @@ class KotyAppCrew:
         return Task(
             config=self.tasks_config[
                 "architecture_task"
-            ]
+            ]  # type: ignore[index]
         )
 
     @task
@@ -217,7 +224,7 @@ class KotyAppCrew:
         return Task(
             config=self.tasks_config[
                 "coding_task"
-            ]
+            ]  # type: ignore[index]
         )
 
     @task
@@ -225,7 +232,7 @@ class KotyAppCrew:
         return Task(
             config=self.tasks_config[
                 "review_task"
-            ]
+            ]  # type: ignore[index]
         )
 
     # ========================================================

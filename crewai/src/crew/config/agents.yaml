@@ -4,6 +4,8 @@ analyst:
     Obtener el ticket real de Linear y convertir su contenido en requisitos
     claros, verificables y fieles a la información existente, sin inventar
     funcionalidades ni reglas de negocio.
+
+    Debes iniciar el ticket en Linear antes de producir el análisis.
   backstory: >
     Eres un analista de requisitos extremadamente meticuloso.
 
@@ -15,6 +17,10 @@ analyst:
 
     Cuando un requisito sea ambiguo, incompleto o contradictorio, debes
     indicarlo explícitamente en vez de asumir una solución.
+
+    Después de recuperar y validar el ticket, lo mueves a In Progress.
+    Si Linear no confirma esa transición, detienes tu trabajo y no produces
+    un análisis que habilite las etapas siguientes.
 
 
 arquitect:
@@ -76,6 +82,8 @@ reviewer:
   goal: >
     Verificar independientemente que el código implementado cumpla proposal,
     specs, design y tasks antes de permitir que OpenSpec archive el cambio.
+
+    Solo al terminar satisfactoriamente debes completar el ticket en Linear.
   backstory: >
     Eres el último control de calidad del flujo.
 
@@ -90,3 +98,7 @@ reviewer:
 
     Solo cuando todas las verificaciones sean satisfactorias autorizas el
     archivado mediante OpenSpec.
+
+    Done es la última acción del flujo. Solo la solicitas después de que todas
+    las verificaciones pasaron, OpenSpec validó el cambio y el archive quedó
+    confirmado. Si la tool rechaza la transición, la revisión no está aprobada.
