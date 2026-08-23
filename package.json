@@ -13,7 +13,7 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "test": "vitest run",
-    "test:shell": "bash scripts/tests/bootstrap.test.sh",
+    "test:shell": "node scripts/tests/run-bootstrap-tests.mjs",
     "crew:check": "uv run --project crewai pytest crewai/tests -v && OPENSPEC_TELEMETRY=0 pnpm exec openspec validate --all --strict",
     "verify": "pnpm lint && pnpm test && pnpm test:shell && pnpm build && pnpm crew:check",
     "clean": "pnpm -r --filter=./** clean",

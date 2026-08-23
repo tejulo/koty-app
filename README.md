@@ -55,7 +55,9 @@ Las versiones de dependencias del proyecto quedan fijadas en `pnpm-lock.yaml` y 
 
 ## Instalacion
 
-Desde la raiz del repositorio, el flujo completo es:
+Desde la raiz del repositorio, elige el flujo de tu shell.
+
+### Bash (Linux, macOS y WSL)
 
 ```bash
 ./scripts/bootstrap.sh
@@ -67,7 +69,23 @@ cd crewai
 uv run run_crew DEV-5
 ```
 
+### PowerShell 5.1 o 7 (Windows)
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
+# ejecutar las instrucciones que imprime para activar mise en este shell
+# completar crewai\.env
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
+pnpm verify
+Set-Location crewai
+uv run run_crew DEV-5
+```
+
+En PowerShell 7, sustituye `powershell.exe` por `pwsh` en ambos comandos.
+
 `bootstrap.sh` instala `mise` cuando hace falta, instala las versiones fijadas en `.mise.toml`, sincroniza las dependencias pnpm y uv con sus lockfiles y crea `crewai/.env` desde el ejemplo solo si no existe. Al final ejecuta `doctor.sh`; por eso puede devolver un codigo distinto de cero hasta que se completen las credenciales y modelos requeridos en `crewai/.env`. Despues de completarlos, vuelve a ejecutar `./scripts/doctor.sh`.
+
+En Windows, `bootstrap.ps1` realiza el mismo flujo y usa `winget` para instalar `mise` si es necesario. El script funciona en Windows PowerShell 5.1 y PowerShell 7; la primera ejecucion puede requerir abrir una nueva sesion para que `winget` actualice `PATH`.
 
 El bootstrap no puede modificar el shell padre. En un resultado exitoso imprime instrucciones idempotentes para agregar `~/.local/bin` y activar `mise` en Bash o Zsh. Ejecuta ese bloque antes de usar los comandos bare `pnpm` y `uv` mostrados en el resto de este documento.
 
@@ -76,6 +94,13 @@ Si prefieres no modificar la configuracion del shell, usa la ruta de `mise` que 
 ```bash
 "$HOME/.local/bin/mise" exec -- pnpm verify
 "$HOME/.local/bin/mise" exec -- uv run --project crewai run_crew DEV-5
+```
+
+En PowerShell, la alternativa sin modificar el perfil es:
+
+```powershell
+& (Get-Command mise).Source exec -- pnpm verify
+& (Get-Command mise).Source exec -- uv run --project crewai run_crew DEV-5
 ```
 
 Si `mise` ya estaba instalado en otra ruta, sustituye `"$HOME/.local/bin/mise"` por la ruta resuelta que aparece en la salida. La forma general de la alternativa es `mise exec -- <comando>`.
@@ -171,6 +196,14 @@ Despues de activar `mise` con el bloque impreso por bootstrap y de que `./script
 export TICKET_ACTIVO=DEV-123 # reemplazar por un ticket activo real
 cd crewai
 uv run run_crew "$TICKET_ACTIVO"
+```
+
+En PowerShell:
+
+```powershell
+$env:TICKET_ACTIVO = 'DEV-123' # reemplazar por un ticket activo real
+Set-Location crewai
+uv run run_crew $env:TICKET_ACTIVO
 ```
 
 No es necesario activar manualmente `crewai/.venv`. Para agregar o eliminar dependencias:
