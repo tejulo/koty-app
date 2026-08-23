@@ -126,17 +126,21 @@ def test_verificacion_exitosa_registra_evidencia(monkeypatch):
     assert "python" in tools_module._VERIFICACIONES_EXITOSAS
 
 
-def test_validate_y_archive_registran_evidencia(monkeypatch):
+def test_archive_exitoso_invalida_verificaciones_y_preserva_evidencia(monkeypatch):
     def run(command, **kwargs):
         return subprocess.CompletedProcess(command, 0, "ok", "")
 
     monkeypatch.setattr(subprocess, "run", run)
+    tools_module._VERIFICACIONES_EXITOSAS.update(
+        {"python", "lint", "test", "build"}
+    )
 
     tools_module.ejecutar_openspec.func(
         "validate dev-5 --strict --no-interactive"
     )
     tools_module.ejecutar_openspec.func("archive dev-5 --yes")
 
+    assert tools_module._VERIFICACIONES_EXITOSAS == set()
     assert tools_module._CAMBIOS_VALIDADOS == {"dev-5"}
     assert tools_module._CAMBIOS_ARCHIVADOS == {"dev-5"}
 

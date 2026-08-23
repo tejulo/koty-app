@@ -591,6 +591,7 @@ def ejecutar_openspec(
                 _CAMBIOS_VALIDADOS.add(argumentos[1])
             elif argumentos[0] == "archive":
                 _CAMBIOS_ARCHIVADOS.add(argumentos[1])
+                _VERIFICACIONES_EXITOSAS.clear()
             return (
                 "Éxito OpenSpec\n\n"
                 + salida
