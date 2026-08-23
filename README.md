@@ -156,7 +156,7 @@ Los siguientes scripts existen en el `package.json` raiz:
 | `pnpm build` | Compila recursivamente los paquetes que definen `build`. |
 | `pnpm lint` | Ejecuta lint recursivamente en modo de solo lectura. |
 | `pnpm test` | Ejecuta la suite Vitest. |
-| `pnpm test:shell` | Ejecuta las pruebas shell de bootstrap y doctor. |
+| `pnpm test:shell` | Ejecuta las pruebas de bootstrap y doctor: Bash en Unix y PowerShell en Windows. |
 | `pnpm crew:check` | Ejecuta pytest y la validacion estricta de OpenSpec. |
 | `pnpm verify` | Ejecuta lint, todas las pruebas, builds y verificaciones de CrewAI/OpenSpec. |
 | `pnpm clean` | Elimina artefactos generados mediante los scripts de cada paquete. |
@@ -178,7 +178,7 @@ Exporta configuraciones compartidas de TypeScript y ESLint. Tailwind CSS permane
 
 ## CrewAI
 
-El subproyecto `crewai/` automatiza analisis, planificacion, implementacion y revision de cambios mediante agentes. Sus dependencias se administran exclusivamente con `uv` y las sincroniza `./scripts/bootstrap.sh`.
+El subproyecto `crewai/` automatiza analisis, planificacion, implementacion y revision de cambios mediante agentes. Sus dependencias se administran exclusivamente con `uv` y las sincroniza el bootstrap correspondiente a la plataforma: `./scripts/bootstrap.sh` en Unix o `scripts/bootstrap.ps1` en Windows.
 
 Configura en `crewai/.env` las claves y modelos requeridos por el archivo de ejemplo:
 
@@ -190,7 +190,7 @@ Configura en `crewai/.env` las claves y modelos requeridos por el archivo de eje
 - `ZEN_CODER_MODEL`
 - `ZEN_REVIEWER_MODEL`
 
-Despues de activar `mise` con el bloque impreso por bootstrap y de que `./scripts/doctor.sh` y `pnpm verify` finalicen correctamente, ejecutar un ticket activo:
+Despues de activar `mise` con el bloque impreso por bootstrap y de que el doctor correspondiente (`./scripts/doctor.sh` o `scripts/doctor.ps1`) y `pnpm verify` finalicen correctamente, ejecutar un ticket activo:
 
 ```bash
 export TICKET_ACTIVO=DEV-123 # reemplazar por un ticket activo real
