@@ -3,9 +3,11 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import requests
 from crewai.tools import tool
+from crewai.tools.tool_failure import ToolFailure
 
 
 # ============================================================
@@ -163,10 +165,108 @@ def _truncar_texto(
 # Linear
 # ============================================================
 
+LINEAR_URL = "https://api.linear.app/graphql"
+LINEAR_TEAM_KEY = "DEV"
+LINEAR_PROJECT_NAME = "koty-app"
+LINEAR_IN_PROGRESS_STATE_ID = "008d4363-c312-4d53-86d4-ad2210650291"
+LINEAR_DONE_STATE_ID = "10a67bb1-f5aa-4fe6-ae85-213f792d5a48"
+
+_TICKETS_CONSULTADOS: set[str] = set()
+_TICKETS_INICIADOS: set[str] = set()
+
+
+def _normalizar_ticket_id(ticket_id: str) -> str:
+    normalizado = ticket_id.strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9]*-\d+", normalizado):
+        raise ValueError("El ticket debe usar un identificador como DEV-5.")
+    return normalizado
+
+
+def _solicitar_linear(
+    query: str,
+    variables: dict[str, Any],
+) -> dict[str, Any]:
+    api_key = os.environ.get("LINEAR_API_KEY")
+    if not api_key:
+        raise RuntimeError("Falta la variable LINEAR_API_KEY.")
+
+    response = requests.post(
+        LINEAR_URL,
+        json={"query": query, "variables": variables},
+        headers={"Authorization": api_key, "Content-Type": "application/json"},
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get("errors"):
+        mensajes = "; ".join(
+            error.get("message", "Error desconocido")
+            for error in payload["errors"]
+        )
+        raise RuntimeError(f"Linear rechazó la operación: {mensajes}")
+    return payload.get("data", {})
+
+
+def _obtener_tarea_linear(ticket_id: str) -> dict[str, Any]:
+    query = """
+    query Issue($id: String!) {
+      issue(id: $id) {
+        id identifier title description priority priorityLabel
+        state { id name }
+        project { id name }
+        team { id key name }
+      }
+    }
+    """
+    issue = _solicitar_linear(query, {"id": ticket_id}).get("issue")
+    if not issue:
+        raise RuntimeError(f"No se encontró el ticket '{ticket_id}'.")
+    if (issue.get("team") or {}).get("key") != LINEAR_TEAM_KEY:
+        raise RuntimeError("El ticket no pertenece al team dev.")
+    if (issue.get("project") or {}).get("name") != LINEAR_PROJECT_NAME:
+        raise RuntimeError("El ticket no pertenece al proyecto koty-app.")
+    return issue
+
+
+def _cambiar_estado_linear(
+    ticket_id: str,
+    estados_origen: set[str],
+    state_id: str,
+    estado_destino: str,
+) -> dict[str, Any]:
+    issue = _obtener_tarea_linear(ticket_id)
+    estado_actual = (issue.get("state") or {}).get("name")
+    if estado_actual not in estados_origen:
+        permitidos = ", ".join(sorted(estados_origen))
+        raise RuntimeError(
+            f"El ticket está en '{estado_actual}'; se esperaba {permitidos}."
+        )
+
+    mutation = """
+    mutation IssueUpdate($id: String!, $stateId: String!) {
+      issueUpdate(id: $id, input: {stateId: $stateId}) { success }
+    }
+    """
+    resultado = _solicitar_linear(
+        mutation,
+        {"id": ticket_id, "stateId": state_id},
+    ).get("issueUpdate") or {}
+    if not resultado.get("success"):
+        raise RuntimeError("Linear no confirmó issueUpdate.")
+
+    actualizado = _obtener_tarea_linear(ticket_id)
+    estado_confirmado = (actualizado.get("state") or {}).get("name")
+    if estado_confirmado != estado_destino:
+        raise RuntimeError(
+            f"La postcondición falló: estado recibido '{estado_confirmado}'."
+        )
+    return actualizado
+
+
 @tool("Buscar Tarea en Linear")
 def buscar_tarea_linear(
     ticket_id: str,
-) -> str:
+) -> str | ToolFailure:
     """
     Busca un ticket en Linear.
 
@@ -175,89 +275,10 @@ def buscar_tarea_linear(
         DEV-5
     """
 
-    api_key = os.environ.get(
-        "LINEAR_API_KEY"
-    )
-
-    if not api_key:
-        return (
-            "Error: Falta la variable "
-            "LINEAR_API_KEY."
-        )
-
-    query = """
-    query Issue($id: String!) {
-      issue(id: $id) {
-        id
-        identifier
-        title
-        description
-        priority
-        priorityLabel
-
-        state {
-          name
-        }
-
-        project {
-          name
-        }
-
-        team {
-          key
-          name
-        }
-      }
-    }
-    """
-
-    headers = {
-        "Authorization": api_key,
-        "Content-Type": "application/json",
-    }
-
     try:
-        response = requests.post(
-            "https://api.linear.app/graphql",
-            json={
-                "query": query,
-                "variables": {
-                    "id": ticket_id,
-                },
-            },
-            headers=headers,
-            timeout=20,
-        )
-
-        response.raise_for_status()
-
-        data = response.json()
-
-        if data.get("errors"):
-            mensajes = [
-                error.get(
-                    "message",
-                    "Error desconocido",
-                )
-                for error in data["errors"]
-            ]
-
-            return (
-                "Error de Linear:\n"
-                + "\n".join(mensajes)
-            )
-
-        issue = (
-            data
-            .get("data", {})
-            .get("issue")
-        )
-
-        if not issue:
-            return (
-                f"No se encontró el ticket "
-                f"'{ticket_id}'."
-            )
+        normalizado = _normalizar_ticket_id(ticket_id)
+        issue = _obtener_tarea_linear(normalizado)
+        _TICKETS_CONSULTADOS.add(issue["identifier"].upper())
 
         state = (
             issue.get("state")
@@ -316,22 +337,38 @@ def buscar_tarea_linear(
             MAX_CARACTERES_ARCHIVO,
         )
 
-    except requests.Timeout:
-        return (
-            "Error: La solicitud a Linear "
-            "excedió el tiempo máximo."
-        )
-
-    except requests.RequestException as error:
-        return (
-            "Error de conexión con Linear: "
-            f"{error}"
-        )
-
     except Exception as error:
-        return (
-            "Error procesando Linear: "
-            f"{error}"
+        return ToolFailure(
+            message=str(error),
+            code="LINEAR_QUERY_FAILED",
+            retryable=False,
+        )
+
+
+@tool("Marcar Tarea en Progreso")
+def marcar_tarea_en_progreso_linear(ticket_id: str) -> str | ToolFailure:
+    """Moves the previously queried Linear ticket from Backlog/Todo to In Progress."""
+    try:
+        normalizado = _normalizar_ticket_id(ticket_id)
+        if normalizado not in _TICKETS_CONSULTADOS:
+            return ToolFailure(
+                message="Debes buscar este ticket antes de iniciarlo.",
+                code="TICKET_NOT_QUERIED",
+                retryable=False,
+            )
+        _cambiar_estado_linear(
+            normalizado,
+            {"Backlog", "Todo"},
+            LINEAR_IN_PROGRESS_STATE_ID,
+            "In Progress",
+        )
+        _TICKETS_INICIADOS.add(normalizado)
+        return f"Ticket {normalizado} confirmado en In Progress."
+    except Exception as error:
+        return ToolFailure(
+            message=str(error),
+            code="LINEAR_START_REJECTED",
+            retryable=False,
         )
 
 

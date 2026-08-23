@@ -2,12 +2,74 @@ import os
 import subprocess
 
 import pytest
+from crewai.tools.tool_failure import ToolFailure
 
+import crew.tools.custom_tool as tools_module
 from crew.tools.custom_tool import (
     PROJECT_ROOT,
     _validar_comando_openspec,
     ejecutar_openspec,
+    marcar_tarea_en_progreso_linear,
 )
+
+
+@pytest.fixture(autouse=True)
+def limpiar_evidencia_linear():
+    tools_module._TICKETS_CONSULTADOS.clear()
+    tools_module._TICKETS_INICIADOS.clear()
+    yield
+    tools_module._TICKETS_CONSULTADOS.clear()
+    tools_module._TICKETS_INICIADOS.clear()
+
+
+def test_iniciar_ticket_exige_busqueda_previa():
+    resultado = marcar_tarea_en_progreso_linear.func("DEV-5")
+
+    assert isinstance(resultado, ToolFailure)
+    assert resultado.code == "TICKET_NOT_QUERIED"
+
+
+def test_iniciar_ticket_actualiza_y_registra_evidencia(monkeypatch):
+    llamada = {}
+    tools_module._TICKETS_CONSULTADOS.add("DEV-5")
+
+    def cambiar(ticket_id, estados_origen, state_id, estado_destino):
+        llamada.update(
+            ticket_id=ticket_id,
+            estados_origen=estados_origen,
+            state_id=state_id,
+            estado_destino=estado_destino,
+        )
+        return {"identifier": "DEV-5", "state": {"name": "In Progress"}}
+
+    monkeypatch.setattr(tools_module, "_cambiar_estado_linear", cambiar)
+
+    resultado = marcar_tarea_en_progreso_linear.func("dev-5")
+
+    assert resultado == "Ticket DEV-5 confirmado en In Progress."
+    assert tools_module._TICKETS_INICIADOS == {"DEV-5"}
+    assert llamada == {
+        "ticket_id": "DEV-5",
+        "estados_origen": {"Backlog", "Todo"},
+        "state_id": "008d4363-c312-4d53-86d4-ad2210650291",
+        "estado_destino": "In Progress",
+    }
+
+
+def test_iniciar_ticket_convierte_rechazo_en_tool_failure(monkeypatch):
+    tools_module._TICKETS_CONSULTADOS.add("DEV-5")
+
+    def cambiar(*args, **kwargs):
+        raise RuntimeError("El ticket está en Canceled")
+
+    monkeypatch.setattr(tools_module, "_cambiar_estado_linear", cambiar)
+
+    resultado = marcar_tarea_en_progreso_linear.func("DEV-5")
+
+    assert isinstance(resultado, ToolFailure)
+    assert resultado.code == "LINEAR_START_REJECTED"
+    assert "Canceled" in resultado.message
+    assert not tools_module._TICKETS_INICIADOS
 
 
 @pytest.mark.parametrize(
