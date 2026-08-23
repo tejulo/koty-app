@@ -122,7 +122,7 @@ Por esta razón, las herramientas internas de CrewAI ejecutan OpenSpec utilizand
 
 # Instalación
 
-`./scripts/bootstrap.sh`, ejecutado desde la raiz, sincroniza el entorno con:
+El bootstrap correspondiente a la plataforma, ejecutado desde la raiz (`./scripts/bootstrap.sh` en Unix o `scripts/bootstrap.ps1` en Windows), sincroniza el entorno con:
 
 ```bash
 uv sync --project crewai --frozen
