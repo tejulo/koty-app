@@ -1,12 +1,19 @@
 import createTypeScriptConfig from '@koty-app/config/eslint';
 
-export default createTypeScriptConfig({
-  strict: true,
-  tsconfigRootDir: import.meta.dirname,
-  project: './tsconfig.json',
-  rules: {
-    '@typescript-eslint/explicit-function-return-type': 'off',
-    '@typescript-eslint/explicit-module-boundary-types': 'off',
-    '@typescript-eslint/no-extraneous-class': 'off',
+export default [
+  ...createTypeScriptConfig({
+    strict: true,
+    project: './tsconfig.json',
+    tsconfigRootDir: import.meta.dirname,
+  }),
+  {
+    ignores: [
+      '**/*.spec.ts',
+      '**/*.test.ts',
+      'test/**',
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/.next/**',
+    ],
   },
-});
+];

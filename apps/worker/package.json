@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "node --env-file=../../.env ./node_modules/tsx/dist/cli.mjs watch src/main.ts",
     "start": "node dist/main.js",
     "build": "tsc",
     "lint": "eslint src/",
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@prisma/client": "5.22.0",
     "@koty-app/contracts": "workspace:*"
   },
   "devDependencies": {

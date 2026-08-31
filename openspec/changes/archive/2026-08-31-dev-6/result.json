@@ -1,0 +1,16 @@
+{
+  "ticket_id": "DEV-6",
+  "change_id": "dev-6",
+  "status": "approved",
+  "failure_type": "none",
+  "failure_stage": null,
+  "summary": "DEV-6 entrega Prisma con cliente generado durante la instalación, una migración inicial versionada, comandos explícitos para migrar y verificar drift, y pruebas de integración con PostgreSQL real en una base única por ejecución. La verificación final pasó: compilación Python, lint, tests unitarios, build, OpenSpec estricto, `migrate status`, `db:verify` y la integración contra PostgreSQL efímero con cleanup confirmado. No hay invocaciones de migración desde los entrypoints de API o worker.",
+  "verification": {
+    "python": "passed",
+    "lint": "passed",
+    "test": "passed",
+    "build": "passed",
+    "playwright": "skipped",
+    "openspec": "passed"
+  }
+}

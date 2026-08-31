@@ -506,7 +506,6 @@ def finalize(
                     "archive",
                     change_id,
                     "--yes",
-                    "--json",
                 ]
             )
 

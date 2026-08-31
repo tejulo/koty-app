@@ -1,0 +1,20 @@
+// Prisma schema for koty-app API
+// Migrations are versioned under prisma/migrations/.
+// Run `pnpm db:verify` to ensure the schema is in sync with the migration history.
+// See CONTRIBUTING.md for the migration workflow.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Prisma requires at least one model to generate its client. This technical
+// marker establishes the initial migration without introducing domain data.
+model SchemaMigrationMarker {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+}

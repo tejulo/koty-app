@@ -3,19 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "node --env-file=../../.env ./node_modules/@nestjs/cli/bin/nest.js start --watch",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "build": "nest build",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\"",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "postinstall": "prisma generate",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:reset": "prisma migrate reset --force",
+    "db:migrate:status": "prisma migrate status",
+    "db:verify": "prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url \"$SHADOW_DATABASE_URL\" --script",
+    "test:integration": "vitest run --config vitest.config.integration.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.2.0",
     "@nestjs/core": "11.2.0",
     "@nestjs/platform-express": "11.2.0",
     "@nestjs/swagger": "^7.3.1",
+    "@prisma/client": "5.22.0",
     "nestjs-zod": "^3.0.0",
     "reflect-metadata": "^0.2.1",
     "rxjs": "^7.8.1",
@@ -27,8 +35,12 @@
     "@nestjs/schematics": "11.1.0",
     "@types/express": "5.0.6",
     "@types/node": "^20.11.16",
+    "@types/pg": "^8.15.7",
     "eslint": "9.39.5",
+    "pg": "^8.16.3",
+    "prisma": "5.22.0",
     "typescript": "^5.3.3",
+    "vitest": "3.2.6",
     "@koty-app/config": "workspace:*"
   }
 }

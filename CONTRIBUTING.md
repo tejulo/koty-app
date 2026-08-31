@@ -173,6 +173,63 @@ La API debe responder en `http://localhost:3001` y validar que `DATABASE_URL` es
 
 ---
 
+# 2.7 Prisma migrations
+
+Las migraciones de Prisma se ejecutan **únicamente** mediante comandos explícitos. La aplicación nunca aplica migraciones al arrancar.
+
+| Comando | Descripción |
+|---|---|
+| `pnpm db:migrate:dev --name <nombre>` | Crea una nueva migración versionada y la aplica sobre la base de desarrollo. |
+| `pnpm db:migrate:deploy` | Aplica las migraciones pendientes en modo `deploy` (CI, pruebas). |
+| `pnpm db:migrate:reset` | Recrea la base de desarrollo y reaplica todas las migraciones desde cero. |
+| `pnpm db:migrate:status` | Lista las migraciones aplicadas y las pendientes. |
+| `pnpm db:verify` | Ejecuta `prisma migrate diff` para confirmar que el esquema coincide con el historial. |
+
+Buenas prácticas:
+
+- Cada cambio de esquema se commitea junto con su migración SQL bajo `apps/api/prisma/migrations/`.
+- Antes de mergear, ejecuta `pnpm db:verify` para detectar drift entre `schema.prisma` y el historial.
+- Si necesitas descartar cambios locales en la base, usa `pnpm db:migrate:reset`.
+- Ningún `main.ts` ni ciclo de vida de Nest invoca `prisma migrate` directamente; si lo necesitas, crea un script en `package.json` y consúltalo con el equipo.
+
+### Reproducir el esquema desde una base vacía
+
+Con el contenedor PostgreSQL arriba y `DATABASE_URL` definido en `.env`:
+
+```bash
+pnpm db:migrate:deploy
+```
+
+El comando aplica todas las migraciones versionadas y deja el esquema listo, sin pasos manuales.
+
+---
+
+# 2.8 Integration tests (apps/api)
+
+Las pruebas de integración de `apps/api` se ejecutan contra una base PostgreSQL real aislada por ejecución. La configuración se encuentra en `apps/api/vitest.config.integration.ts`.
+
+Requisitos:
+
+- PostgreSQL local accesible (el mismo usado para desarrollo).
+- `DATABASE_URL` definida y con permisos para crear bases de datos.
+- (Opcional) `DATABASE_URL_TEST` definida en `.env` con la URL base; si no se define, el `globalSetup` deriva una base `plandepo_test_<runId>` usando `DATABASE_URL`.
+
+Ejecución:
+
+```bash
+pnpm --filter @koty-app/api test:integration
+```
+
+El flujo:
+
+1. `globalSetup` crea la base aislada y aplica `prisma migrate deploy` sobre ella.
+2. Los tests de integración se ejecutan contra esa base.
+3. `globalTeardown` cierra las conexiones y destruye la base.
+
+Los tests de integración **no** mockean el cliente Prisma; cualquier sustitución queda prohibida por el requisito de "Pruebas de integración contra PostgreSQL real con base aislada".
+
+---
+
 # 3. Rama principal
 
 La rama principal del proyecto es:
@@ -307,54 +364,11 @@ feat/dev-5-inicializar-monorepo
 Nueva funcionalidad.
 
 ```text
-feat/dev-5-inicializar-monorepo
-feat/dev-20-agregar-autenticacion
-```
+feat/
 
-### fix
+...[TRUNCADO]...
 
-Corrección de errores.
-
-```text
-fix/dev-12-corregir-login
-fix/dev-23-corregir-validacion-email
-```
-
-### refactor
-
-Cambios internos que no agregan nuevas funcionalidades ni corrigen directamente un bug.
-
-```text
-refactor/dev-18-reorganizar-auth
-```
-
-### docs
-
-Cambios de documentación.
-
-```text
-docs/dev-22-actualizar-readme
-```
-
-### test
-
-Cambios relacionados principalmente con tests.
-
-```text
-test/dev-30-agregar-tests-auth
-```
-
-### chore
-
-Mantenimiento general.
-
-```text
-chore/dev-35-actualizar-dependencias
-```
-
-### build
-
-Cambios relacionados con herramientas de compilación o packaging.
+ambios relacionados con herramientas de compilación o packaging.
 
 ```text
 build/dev-40-configurar-turbo
@@ -1182,7 +1196,7 @@ DEV-12
 DEV-20
 ```
 
-Si aparece trabajo adicional, crea otro ticket y otra branch.
+Si aparece trabajo adicional, crea otro ticket y crea otra branch.
 
 ---
 
