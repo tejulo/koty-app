@@ -124,11 +124,23 @@ Stop this iteration without emitting a promise.
 
 ## 5. Run CrewAI
 
-Run:
+Start or poll the supervised CrewAI run:
 
-cd crewai && uv run run_crew ticket_id
+./scripts/run-crew-ticket.sh ticket_id --start
 
-Read the JSON printed by run_crew.
+Read the JSON result.
+
+If status=running:
+
+Stop this iteration without emitting a promise. The next Ralph iteration will
+poll the same ticket with:
+
+./scripts/run-crew-ticket.sh ticket_id
+
+If status=retry:
+
+Stop this iteration without emitting a promise. The next Ralph iteration will
+start a new supervised CrewAI run for the same ticket.
 
 
 ## 6. Handle Crew result
