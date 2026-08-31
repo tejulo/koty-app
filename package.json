@@ -22,7 +22,12 @@
     "start:worker": "pnpm --filter @koty-app/worker start",
     "db:start": "docker compose up -d",
     "db:stop": "docker compose down",
-    "db:status": "docker compose ps"
+    "db:status": "docker compose ps",
+    "db:migrate:dev": "pnpm --filter @koty-app/api db:migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @koty-app/api db:migrate:deploy",
+    "db:migrate:reset": "pnpm --filter @koty-app/api db:migrate:reset",
+    "db:migrate:status": "pnpm --filter @koty-app/api db:migrate:status",
+    "db:verify": "pnpm --filter @koty-app/api db:verify"
   },
   "devDependencies": {
     "@fission-ai/openspec": "1.4.1",

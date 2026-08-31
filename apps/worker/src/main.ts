@@ -1,3 +1,4 @@
+import { PrismaClient } from '@prisma/client';
 import { Worker } from './index.js';
 
 const REQUIRED_ENV_VARS = ['DATABASE_URL'] as const;
@@ -22,7 +23,19 @@ function validateEnvironment(): void {
   }
 }
 
+async function validatePrismaClient(): Promise<void> {
+  try {
+    const probe = new PrismaClient({ datasourceUrl: process.env['DATABASE_URL'] });
+    await probe.$disconnect();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`DATABASE_URL is not parseable by Prisma: ${message}`);
+    process.exit(1);
+  }
+}
+
 validateEnvironment();
+await validatePrismaClient();
 
 const worker = new Worker({
   name: 'koty-worker',

@@ -1,5 +1,6 @@
 import { ApiResponse, ApiTags } from '@nestjs/swagger';
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpException, HttpStatus } from '@nestjs/common';
+
 import { HealthService } from './health.service';
 import { HealthResponseDto } from './dto/health-response.dto';
 import { errorResponseSchema } from '../common/openapi/schemas/error.schema';
@@ -10,9 +11,15 @@ export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
   @Get()
+  @HttpCode(HttpStatus.OK)
   @ApiResponse({
     status: 200,
     description: 'Health check response',
+    type: HealthResponseDto,
+  })
+  @ApiResponse({
+    status: 503,
+    description: 'Health check degraded response',
     type: HealthResponseDto,
   })
   @ApiResponse({
@@ -20,7 +27,13 @@ export class HealthController {
     description: 'Error response',
     schema: errorResponseSchema,
   })
-  check(): HealthResponseDto {
-    return this.healthService.check();
+  async check(): Promise<HealthResponseDto> {
+    const result = await this.healthService.check();
+
+    if (result.status === 'degraded') {
+      throw new HttpException(result, HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    return result;
   }
 }

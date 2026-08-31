@@ -10,6 +10,10 @@ export default defineConfig({
     exclude: [
       'apps/api/src/common/**/*.spec.ts',
       'apps/api/src/health/**/*.spec.ts',
+      'apps/api/src/**/*.integration.spec.ts',
+      'apps/api/test/**',
+      '**/node_modules/**',
+      '**/dist/**',
     ],
   },
 });
