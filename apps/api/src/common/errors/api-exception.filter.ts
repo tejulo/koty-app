@@ -20,6 +20,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     const BAD_REQUEST = 400;
     const UNAUTHORIZED = 401;
+    const CONFLICT = 409;
     const NOT_FOUND = 404;
     const INTERNAL_ERROR = 500;
 
@@ -33,9 +34,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
       const exceptionResponse = exception.getResponse();
 
       if (typeof exceptionResponse === 'object') {
-        const resp = exceptionResponse as { message?: unknown };
+        const resp = exceptionResponse as { message?: unknown; code?: unknown };
         const msgValue = resp.message;
-        
+
         if (typeof msgValue === 'string') {
           message = msgValue;
         } else if (Array.isArray(msgValue)) {
@@ -52,6 +53,11 @@ export class ApiExceptionFilter implements ExceptionFilter {
           });
           message = 'Validation failed';
           code = ErrorCode.VALIDATION_ERROR;
+        } else if (typeof resp.code === 'string') {
+          // The exception explicitly carried a pre-resolved ErrorCode (used by
+          // IdempotencyKeyReusedException). Trust it and leave the rest of the
+          // message untouched.
+          code = resp.code as ErrorCode;
         }
       } else if (typeof exceptionResponse === 'string') {
         message = exceptionResponse;
@@ -63,6 +69,8 @@ export class ApiExceptionFilter implements ExceptionFilter {
         code = ErrorCode.VALIDATION_ERROR;
       } else if (httpStatus === UNAUTHORIZED) {
         code = ErrorCode.UNAUTHORIZED;
+      } else if (httpStatus === CONFLICT) {
+        code = ErrorCode.IDEMPOTENCY_KEY_REUSED;
       } else if (httpStatus === NOT_FOUND) {
         code = ErrorCode.NOT_FOUND;
       } else if (httpStatus >= INTERNAL_ERROR) {

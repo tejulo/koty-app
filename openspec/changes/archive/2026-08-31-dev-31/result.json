@@ -1,0 +1,16 @@
+{
+  "ticket_id": "DEV-31",
+  "change_id": "dev-31",
+  "status": "approved",
+  "failure_type": "none",
+  "failure_stage": null,
+  "summary": "Revisión final completada para DEV-31 ('Procesar comandos sensibles con idempotencia'). Los artifacts OpenSpec (proposal.md, design.md, tasks.md, specs/api-v1-idempotency/spec.md) son correctos y están completos. proposal.md define problema, objetivo, alcance, fuera de alcance, impacto, riesgos, trazabilidad con CONTEXT.md y resuelve explícitamente las 5 ambigüedades del ticket (A-1 catálogo inicial extensible de comandos sensibles, A-2 SHA-256 sobre JSON canónico con claves ordenadas, A-3 sin TTL en este cambio, A-4 mismo status y mismo body confirmados, A-5 rechazo pre-commit entendido como pre-transaction-commit). design.md contiene decisiones técnicas completas (cabecera Idempotency-Key, scope (organizationId, actorId, commandType), modelo Prisma IdempotencyRecord con @@unique compuesto, IdempotencyService.run/commit, manejo de carrera vía P2002, mapeo 409→IDEMPOTENCY_KEY_REUSED, endpoint de smoke POST /api/v1/_idempotency/echo gated por ENABLE_IDEMPOTENCY_ECHO, migración versionada, suite unitaria + integración) e incluye la sección requerida '## Verification Strategy - Browser E2E: not_required' con razón justificada (contrato de API HTTP verificable mediante integración contra PostgreSQL real y specs unitarios, sin UI adicional). tasks.md tiene las 8 secciones del checklist marcadas [x] con cambios concretos y comandos de verificación. spec.md define 7 Requirements (cabecera opcional con validación de longitud, scope por org+actor+commandType, huella canónica estable, reutilización del resultado confirmado, conflicto por huella distinta con 409 IDEMPOTENCY_KEY_REUSED, no consumo en rechazo previo al commit, declaración del código en ErrorResponse) con Scenarios WHEN/THEN verificables cubriendo RF-1 a RF-6. El código en apps/api/src/common/idempotency/ (canonical-fingerprint.ts, canonical-fingerprint.spec.ts, idempotency.service.ts, idempotency.service.spec.ts, idempotency.exceptions.ts, idempotency.module.ts), apps/api/src/common/errors/error-code.enum.ts (IDEMPOTENCY_KEY_REUSED añadido) y apps/api/src/idempotency-echo/ existe y refleja el diseño. Los 23 tests unitarios pasan (5 archivos), lint pasa en packages/config, apps/api, apps/web, packages/contracts, apps/worker, build pasa en packages/config, apps/api (nest build), apps/web (next build), packages/contracts (tsc), apps/worker (tsc) y openspec validate dev-31 --strict --no-interactive finaliza con Exit code 0 y mensaje 'Change dev-31 is valid'. El intento previo (attempt-002) fue una falla de infraestructura (JSON parse error en el runtime del agente), no del cambio, y fue corregido en esta revisión final. Browser E2E está marcado como not_required en design.md, por lo que Playwright se mantiene skipped según la consigna. El cambio no fue archivado y Linear no fue modificado.",
+  "verification": {
+    "python": "passed",
+    "lint": "passed",
+    "test": "passed",
+    "build": "passed",
+    "playwright": "skipped",
+    "openspec": "passed"
+  }
+}

@@ -6,6 +6,7 @@ import signal
 import subprocess
 import time
 from pathlib import Path
+from typing import Literal
 
 import requests
 from crewai.tools import tool
@@ -370,9 +371,9 @@ def ejecutar_openspec(
 
 @tool("Ejecutar Verificacion")
 def ejecutar_verificacion(
-    verificacion: str,
+    verificacion: Literal["python", "lint", "test", "build"],
 ) -> str:
-    """Ejecuta python, lint, test o build."""
+    """Ejecuta una etiqueta exacta: python, lint, test o build; no recibe comandos shell."""
 
     commands = {
         "python": (

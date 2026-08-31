@@ -41,3 +41,10 @@ export class PrismaService
     await this.$disconnect();
   }
 }
+
+/**
+ * Public type alias used by consumers (e.g. `IdempotencyService`) that need
+ * to call Prisma delegates typed against a fully generated `PrismaClient`.
+ * The runtime instance is the same `PrismaService` injected by NestJS.
+ */
+export type PrismaServiceClient = PrismaClient;

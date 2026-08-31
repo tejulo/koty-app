@@ -47,6 +47,7 @@ export async function setup(): Promise<void> {
   process.env['DATABASE_URL_TEST'] = isolatedUrl;
   process.env['TEST_DB_NAME'] = ISOLATED_DB_NAME;
   process.env['INTEGRATION_TEST'] = 'true';
+  process.env['ENABLE_IDEMPOTENCY_ECHO'] = 'true';
 
   const apply = spawnSync(
     'pnpm',

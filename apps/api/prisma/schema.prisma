@@ -18,3 +18,24 @@ model SchemaMigrationMarker {
   id        Int      @id @default(autoincrement())
   createdAt DateTime @default(now())
 }
+
+// IdempotencyRecord stores confirmed responses for sensitive commands processed
+// under an `Idempotency-Key`. The unique constraint on
+// (organizationId, actorId, commandType, idempotencyKey) is the arbitration
+// mechanism between concurrent API instances. See DEV-31 for the full
+// contract.
+model IdempotencyRecord {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  actorId            String
+  commandType        String
+  idempotencyKey     String
+  requestFingerprint String
+  responseStatus     Int
+  responseBody       Json
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([organizationId, actorId, commandType, idempotencyKey])
+  @@index([organizationId, commandType])
+}

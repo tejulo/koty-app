@@ -2,9 +2,16 @@ import { NestFactory } from '@nestjs/core';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from './app.module';
 import { SwaggerModule } from '@nestjs/swagger';
-import { swaggerConfig } from './common/openapi/swagger.config';
+import {
+  idempotencyKeyParameter,
+  swaggerConfig,
+} from './common/openapi/swagger.config';
 import { ApiExceptionFilter } from './common/errors/api-exception.filter';
-import { errorResponseSchema, fieldErrorSchema } from './common/openapi/schemas/error.schema';
+import {
+  errorResponseSchema,
+  fieldErrorSchema,
+  idempotencyKeyReusedSchema,
+} from './common/openapi/schemas/error.schema';
 import { healthResponseSchema } from './common/openapi/schemas/health.schema';
 
 async function bootstrap() {
@@ -47,6 +54,12 @@ async function bootstrap() {
     ErrorResponse: errorResponseSchema,
     FieldError: fieldErrorSchema,
     HealthResponse: healthResponseSchema,
+    IdempotencyKeyReusedError: idempotencyKeyReusedSchema,
+  };
+
+  document.components.parameters = {
+    ...(document.components.parameters || {}),
+    IdempotencyKeyHeader: idempotencyKeyParameter,
   };
 
   SwaggerModule.setup('api/docs', app, document);

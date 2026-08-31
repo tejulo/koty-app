@@ -156,6 +156,10 @@ if $UNTIL_FINALIZED && ! $MAX_ITERATIONS_SET; then
   MAX_ITERATIONS=0
 fi
 
+if $UNTIL_FINALIZED; then
+  exec "$ROOT/scripts/coordinate-crew-ticket.sh"
+fi
+
 export CREW_TICKET_WAIT_SECONDS="${CREW_TICKET_WAIT_SECONDS:-30}"
 
 command -v opencode >/dev/null 2>&1 \

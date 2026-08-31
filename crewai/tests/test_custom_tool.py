@@ -91,6 +91,17 @@ def test_ejecutar_verificacion_dispatches_known_check(monkeypatch):
     ]
 
 
+def test_ejecutar_verificacion_schema_limits_checks():
+    schema = tools_module.ejecutar_verificacion.args_schema.model_json_schema()
+
+    assert schema["properties"]["verificacion"]["enum"] == [
+        "python",
+        "lint",
+        "test",
+        "build",
+    ]
+
+
 def test_ejecutar_verificacion_rejects_unknown_check():
     result = tools_module.ejecutar_verificacion.func("deploy")
 

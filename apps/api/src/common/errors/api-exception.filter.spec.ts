@@ -71,6 +71,43 @@ describe('ApiExceptionFilter', () => {
       });
     });
 
+    it('should handle conflict (409) with IDEMPOTENCY_KEY_REUSED code', () => {
+      const exception = new HttpException(
+        {
+          message: 'Idempotency key reused with a different request payload',
+          code: ErrorCode.IDEMPOTENCY_KEY_REUSED,
+        },
+        HttpStatus.CONFLICT,
+      );
+      const host = createMockArgumentsHost();
+
+      filter.catch(exception, host as any);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(409);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        code: ErrorCode.IDEMPOTENCY_KEY_REUSED,
+        message:
+          'Idempotency key reused with a different request payload',
+        fieldErrors: [],
+        correlationId: 'test-correlation-id',
+      });
+    });
+
+    it('should handle conflict (409) with default IDEMPOTENCY_KEY_REUSED code when no code is provided', () => {
+      const exception = new HttpException('Conflict', HttpStatus.CONFLICT);
+      const host = createMockArgumentsHost();
+
+      filter.catch(exception, host as any);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(409);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        code: ErrorCode.IDEMPOTENCY_KEY_REUSED,
+        message: 'Conflict',
+        fieldErrors: [],
+        correlationId: 'test-correlation-id',
+      });
+    });
+
     it('should handle internal error (500) with INTERNAL_ERROR code', () => {
       const exception = new HttpException('Internal error', HttpStatus.INTERNAL_SERVER_ERROR);
       const host = createMockArgumentsHost();
