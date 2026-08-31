@@ -1,0 +1,6 @@
+rules:
+  design:
+    - >
+      Include a "Verification Strategy" section containing
+      "Browser E2E: required" or
+      "Browser E2E: not_required" with a short reason.

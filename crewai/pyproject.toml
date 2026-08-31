@@ -8,11 +8,14 @@ dependencies = [
     "crewai[tools]==1.15.16",
     "python-dotenv",
     "requests",
+    "pydantic>=2,<3"
 ]
 
 [project.scripts]
 crew = "crew.main:run"
 run_crew = "crew.main:run"
+crew_queue = "crew.queue:run"
+finalize_ticket = "crew.finalizer:run"
 
 [build-system]
 requires = ["hatchling"]

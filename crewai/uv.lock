@@ -555,6 +555,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "crewai", extra = ["tools"] },
+    { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "requests" },
 ]
@@ -567,6 +568,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "crewai", extras = ["tools"], specifier = "==1.15.16" },
+    { name = "pydantic", specifier = ">=2,<3" },
     { name = "python-dotenv" },
     { name = "requests" },
 ]

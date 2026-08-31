@@ -1,224 +1,416 @@
+import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 
-# ============================================================
-# Configuración temprana
-# ============================================================
-#
-# Es importante configurar esto ANTES de importar CrewAI,
-# porque OpenTelemetry puede inicializarse durante los imports.
-#
-
 CREWAI_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = CREWAI_ROOT.parent
 
 load_dotenv(CREWAI_ROOT / ".env")
 
-
-# Desactivar tracing de CrewAI.
 os.environ["CREWAI_TRACING_ENABLED"] = "false"
-
-# Desactivar completamente el SDK de OpenTelemetry.
-#
-# Esto evita mensajes como:
-#
-# opentelemetry.exporter.otlp...
-# Transient error Service Unavailable...
-#
 os.environ["OTEL_SDK_DISABLED"] = "true"
 
 
-# Importar CrewAI solamente después de configurar el entorno.
-from crew.crew import KotyAppCrew
-from crew.tools.custom_tool import (
-    _CAMBIOS_ARCHIVADOS,
-    _CAMBIOS_VALIDADOS,
-    _TICKETS_CONSULTADOS,
-    _TICKETS_INICIADOS,
-    _buscar_directorio_archivado,
-    completar_tarea_linear,
-    ejecutar_openspec,
-    ejecutar_verificacion,
+from .crew import KotyAppCrew
+from .models import CrewResult, VerificationResult
+from .tools.custom_tool import (
+    close_local_environment,
+    close_playwright_session,
 )
-from crewai.tools.tool_failure import ToolFailure
 
 
-def normalizar_ticket(raw_id: str) -> tuple[str, str]:
-    """
-    Convierte el identificador ingresado a los formatos utilizados
-    por Linear y OpenSpec.
+class ArchivedChangeError(RuntimeError):
+    pass
 
-    Ejemplos de entrada aceptados:
 
-        DEV-5
-        dev-5
-        Dev-5
-
-    Resultado:
-
-        ticket_id = DEV-5
-        change_id = dev-5
-    """
-
+def normalize(raw_id: str) -> tuple[str, str]:
     raw_id = raw_id.strip()
-
-    if not raw_id:
-        raise ValueError(
-            "El identificador del ticket es obligatorio."
-        )
 
     if not re.fullmatch(
         r"[A-Za-z][A-Za-z0-9]*-\d+",
         raw_id,
     ):
         raise ValueError(
-            "Formato de ticket inválido. "
-            "Usa un identificador como DEV-5 o dev-5."
+            "Ticket inválido. Ejemplo: DEV-5"
         )
 
-    ticket_id = raw_id.upper()
-    change_id = raw_id.lower()
-
-    return ticket_id, change_id
+    return raw_id.upper(), raw_id.lower()
 
 
-def _exigir_resultado_exitoso(
-    etiqueta: str,
-    resultado: str | ToolFailure,
-    prefijo_exitoso: str,
-) -> str:
-    if isinstance(resultado, ToolFailure):
-        raise RuntimeError(resultado.message)
+def active_change(change_id: str) -> Path:
+    return (
+        PROJECT_ROOT
+        / "openspec"
+        / "changes"
+        / change_id
+    )
 
-    print(resultado)
 
-    if not resultado.startswith(prefijo_exitoso):
+def archived_change(
+    change_id: str,
+) -> Path | None:
+    archive = (
+        PROJECT_ROOT
+        / "openspec"
+        / "changes"
+        / "archive"
+    )
+
+    if not archive.exists():
+        return None
+
+    matches = sorted(
+        archive.glob(f"*-{change_id}"),
+        reverse=True,
+    )
+
+    return matches[0] if matches else None
+
+
+def ensure_change(change_id: str) -> None:
+    if active_change(change_id).exists():
+        return
+
+    if archived_change(change_id):
+        raise ArchivedChangeError(
+            f"{change_id} ya está archivado"
+        )
+
+    result = subprocess.run(
+        [
+            "pnpm",
+            "exec",
+            "openspec",
+            "new",
+            "change",
+            change_id,
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if result.returncode != 0:
         raise RuntimeError(
-            f"{etiqueta} falló o no confirmó OK.\n{resultado}"
+            result.stderr.strip()
+            or result.stdout.strip()
+            or "No se pudo crear el cambio OpenSpec"
         )
 
-    return resultado
 
-
-def finalizar_cambio_archivado(ticket_id: str, change_id: str) -> bool:
-    """Resume a run killed after OpenSpec archive but before Linear Done."""
-    try:
-        _buscar_directorio_archivado(change_id)
-    except RuntimeError:
-        return False
-
-    print(
-        "Cambio OpenSpec ya archivado; ejecutando gates finales "
-        "y completando Linear."
+def attempts_dir(change_id: str) -> Path:
+    return (
+        active_change(change_id)
+        / "attempts"
     )
 
-    _TICKETS_CONSULTADOS.add(ticket_id)
-    _TICKETS_INICIADOS.add(ticket_id)
-    _CAMBIOS_VALIDADOS.add(change_id)
-    _CAMBIOS_ARCHIVADOS.add(change_id)
 
-    for verificacion in ("python", "lint", "test", "build"):
-        resultado = ejecutar_verificacion.func(verificacion)
-        _exigir_resultado_exitoso(
-            f"Verificación posterior al archive '{verificacion}'",
-            resultado,
-            "VERIFICACIÓN EXITOSA",
+def attempt_files(
+    change_id: str,
+) -> list[Path]:
+    path = attempts_dir(change_id)
+
+    if not path.exists():
+        return []
+
+    return sorted(
+        path.glob("attempt-*.md")
+    )
+
+
+def next_attempt(change_id: str) -> int:
+    return len(
+        attempt_files(change_id)
+    ) + 1
+
+
+def last_attempt(change_id: str) -> str:
+    attempts = attempt_files(change_id)
+
+    if not attempts:
+        return "NONE"
+
+    return (
+        attempts[-1]
+        .relative_to(PROJECT_ROOT)
+        .as_posix()
+    )
+
+
+def save_result(
+    change_id: str,
+    result: CrewResult,
+) -> None:
+    path = active_change(change_id)
+
+    if not path.exists():
+        raise RuntimeError(
+            "No existe el cambio OpenSpec activo"
         )
 
-    resultado_openspec = ejecutar_openspec.func("validate --all --strict")
-    _exigir_resultado_exitoso(
-        "OpenSpec validate --all --strict",
-        resultado_openspec,
-        "Éxito OpenSpec",
+    (
+        path / "result.json"
+    ).write_text(
+        result.model_dump_json(indent=2),
+        encoding="utf-8",
     )
 
-    _CAMBIOS_VALIDADOS.add(change_id)
-    _CAMBIOS_ARCHIVADOS.add(change_id)
-    resultado_linear = completar_tarea_linear.func(ticket_id, change_id)
-    _exigir_resultado_exitoso(
-        "Completar Tarea en Linear",
-        resultado_linear,
-        f"Ticket {ticket_id} confirmado en Done.",
+
+def save_attempt(
+    change_id: str,
+    attempt: int,
+    result: CrewResult,
+) -> None:
+    path = attempts_dir(change_id)
+
+    path.mkdir(
+        parents=True,
+        exist_ok=True,
     )
-    return True
+
+    verification = json.dumps(
+        result.verification.model_dump(),
+        indent=2,
+        ensure_ascii=False,
+    )
+
+    content = f"""# Attempt {attempt}
+
+## Status
+
+{result.status}
+
+## Failure
+
+- Type: {result.failure_type}
+- Stage: {result.failure_stage or "unknown"}
+
+## Summary
+
+{result.summary}
+
+## Verification
+
+~~~json
+{verification}
+~~~
+"""
+
+    (
+        path
+        / f"attempt-{attempt:03}.md"
+    ).write_text(
+        content,
+        encoding="utf-8",
+    )
+
+
+def runtime_failure(
+    ticket_id: str,
+    change_id: str,
+    error: Exception,
+) -> CrewResult:
+    message = str(error)
+
+    configuration_error = any(
+        marker in message.lower()
+        for marker in [
+            "falta ",
+            "not found",
+            "no está instalado",
+        ]
+    )
+
+    return CrewResult(
+        ticket_id=ticket_id,
+        change_id=change_id,
+        status=(
+            "blocked"
+            if configuration_error
+            else "retryable_failure"
+        ),
+        failure_type=(
+            "configuration"
+            if configuration_error
+            else "infrastructure"
+        ),
+        failure_stage="runtime",
+        summary=message,
+        verification=VerificationResult(
+            python="skipped",
+            lint="skipped",
+            test="skipped",
+            build="skipped",
+            playwright="skipped",
+            openspec="skipped",
+        ),
+    )
+
+
+def max_attempts_result(
+    ticket_id: str,
+    change_id: str,
+    max_attempts: int,
+) -> CrewResult:
+    return CrewResult(
+        ticket_id=ticket_id,
+        change_id=change_id,
+        status="blocked",
+        failure_type="max_attempts",
+        failure_stage="orchestrator",
+        summary=(
+            f"Se alcanzaron {max_attempts} "
+            "intentos sin completar el ticket."
+        ),
+        verification=VerificationResult(
+            python="skipped",
+            lint="skipped",
+            test="skipped",
+            build="skipped",
+            playwright="skipped",
+            openspec="skipped",
+        ),
+    )
 
 
 def run():
-    """
-    Punto de entrada principal de Koty App Crew.
+    raw_id = (
+        sys.argv[1]
+        if len(sys.argv) > 1
+        else input("Ticket: ")
+    )
 
-    Ejemplos:
-
-        uv run run_crew dev-5
-
-        uv run run_crew DEV-5
-    """
-
-    if len(sys.argv) > 1:
-        raw_id = sys.argv[1]
-    else:
-        raw_id = input(
-            "Ingresa el identificador del ticket "
-            "(ej. DEV-5 o dev-5): "
-        )
+    ticket_id, change_id = normalize(
+        raw_id
+    )
 
     try:
-        ticket_id, change_id = normalizar_ticket(
-            raw_id
+        ensure_change(change_id)
+
+    except ArchivedChangeError:
+        print(
+            json.dumps(
+                {
+                    "ticket_id": ticket_id,
+                    "change_id": change_id,
+                    "status": "archived",
+                    "summary": (
+                        "El cambio ya está archivado. "
+                        "Ejecuta finalize_ticket."
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+
+    attempt = next_attempt(change_id)
+
+    max_attempts = int(
+        os.environ.get(
+            "MAX_TICKET_ATTEMPTS",
+            "3",
+        )
+    )
+
+    if attempt > max_attempts:
+        result = max_attempts_result(
+            ticket_id,
+            change_id,
+            max_attempts,
         )
 
-        print()
-        print("=" * 60)
-        print("Koty App Crew")
-        print("=" * 60)
-        print(f"Ticket Linear:   {ticket_id}")
-        print(f"Cambio OpenSpec: {change_id}")
-        print("=" * 60)
-        print()
+        save_result(
+            change_id,
+            result,
+        )
 
-        inputs = {
-            "ticket_id": ticket_id,
-            "change_id": change_id,
-        }
+        print(
+            result.model_dump_json(indent=2)
+        )
+        return
 
-        if finalizar_cambio_archivado(ticket_id, change_id):
-            print()
-            print("=" * 60)
-            print("Ejecución finalizada")
-            print("=" * 60)
-            return
-
-        resultado = (
+    try:
+        output = (
             KotyAppCrew()
             .crew()
-            .kickoff(inputs=inputs)
+            .kickoff(
+                inputs={
+                    "ticket_id": ticket_id,
+                    "change_id": change_id,
+                    "attempt": attempt,
+                    "last_attempt_path": (
+                        last_attempt(change_id)
+                    ),
+                }
+            )
         )
 
-        print()
-        print("=" * 60)
-        print("Ejecución finalizada")
-        print("=" * 60)
+        if output.pydantic is None:
+            raise RuntimeError(
+                "Reviewer no devolvió "
+                "CrewResult estructurado"
+            )
 
-        if resultado:
-            print(resultado)
+        if isinstance(
+            output.pydantic,
+            CrewResult,
+        ):
+            result = output.pydantic
+        else:
+            result = CrewResult.model_validate(
+                output.pydantic
+            )
 
-    except KeyboardInterrupt:
-        print()
-        print("Ejecución cancelada por el usuario.")
-        raise SystemExit(130)
+        if (
+            result.ticket_id.upper()
+            != ticket_id
+        ):
+            raise RuntimeError(
+                "CrewResult pertenece "
+                "a otro ticket"
+            )
+
+        if result.change_id != change_id:
+            raise RuntimeError(
+                "CrewResult pertenece "
+                "a otro change_id"
+            )
 
     except Exception as error:
-        print()
-        print("=" * 60)
-        print("La ejecución del equipo falló")
-        print("=" * 60)
-        print(f"Error: {error}")
+        result = runtime_failure(
+            ticket_id,
+            change_id,
+            error,
+        )
 
-        raise SystemExit(1)
+    finally:
+        close_playwright_session()
+        close_local_environment()
+
+    save_result(
+        change_id,
+        result,
+    )
+
+    if result.status != "approved":
+        save_attempt(
+            change_id,
+            attempt,
+            result,
+        )
+
+    print(
+        result.model_dump_json(indent=2)
+    )
 
 
 if __name__ == "__main__":

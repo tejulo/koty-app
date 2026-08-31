@@ -1,120 +1,92 @@
+import json
+
 import pytest
-from crewai.tools.tool_failure import ToolFailure
 
 import crew.main as main_module
-from crew.main import normalizar_ticket
+from crew.main import normalize
+from crew.models import CrewResult, VerificationResult
 
 
 @pytest.mark.parametrize(
-    ("raw_id", "esperado"),
+    ("raw_id", "expected"),
     [
         ("DEV-5", ("DEV-5", "dev-5")),
         (" dev-5 ", ("DEV-5", "dev-5")),
         ("Dev123-42", ("DEV123-42", "dev123-42")),
     ],
 )
-def test_normalizar_ticket_acepta_identificadores_validos(raw_id, esperado):
-    assert normalizar_ticket(raw_id) == esperado
+def test_normalize_accepts_valid_ticket_ids(raw_id, expected):
+    assert normalize(raw_id) == expected
 
 
 @pytest.mark.parametrize(
     "raw_id",
     ["", "   ", "DEV", "DEV-", "-5", "DEV 5", "DEV-5-extra"],
 )
-def test_normalizar_ticket_rechaza_identificadores_invalidos(raw_id):
+def test_normalize_rejects_invalid_ticket_ids(raw_id):
     with pytest.raises(ValueError):
-        normalizar_ticket(raw_id)
+        normalize(raw_id)
 
 
-def test_finalizar_cambio_archivado_ejecuta_gates_y_completa(monkeypatch):
-    llamadas_verificacion = []
-    llamadas_openspec = []
-    llamadas_completar = []
+def test_save_attempt_records_structured_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "PROJECT_ROOT", tmp_path)
+    change = tmp_path / "openspec" / "changes" / "dev-6"
+    change.mkdir(parents=True)
 
-    monkeypatch.setattr(
-        main_module,
-        "_buscar_directorio_archivado",
-        lambda change_id: f"archive/{change_id}",
-    )
-
-    def verificar(nombre):
-        llamadas_verificacion.append(nombre)
-        return f"VERIFICACIÓN EXITOSA\n\nVerificación: {nombre}"
-
-    monkeypatch.setattr(
-        main_module.ejecutar_verificacion,
-        "func",
-        verificar,
-    )
-
-    def openspec(comando):
-        llamadas_openspec.append(comando)
-        return "Éxito OpenSpec\n\nExit code: 0"
-
-    monkeypatch.setattr(
-        main_module.ejecutar_openspec,
-        "func",
-        openspec,
-    )
-
-    def completar(ticket_id, change_id):
-        llamadas_completar.append((ticket_id, change_id))
-        return "Ticket DEV-7 confirmado en Done."
-
-    monkeypatch.setattr(
-        main_module.completar_tarea_linear,
-        "func",
-        completar,
-    )
-
-    assert main_module.finalizar_cambio_archivado("DEV-7", "dev-7")
-
-    assert llamadas_verificacion == ["python", "lint", "test", "build"]
-    assert llamadas_openspec == ["validate --all --strict"]
-    assert llamadas_completar == [("DEV-7", "dev-7")]
-
-
-def test_finalizar_cambio_archivado_propaga_fallo_de_gates(monkeypatch):
-    monkeypatch.setattr(
-        main_module,
-        "_buscar_directorio_archivado",
-        lambda change_id: f"archive/{change_id}",
-    )
-    monkeypatch.setattr(
-        main_module.ejecutar_verificacion,
-        "func",
-        lambda nombre: "VERIFICACIÓN FALLIDA\n\nExit code: 1",
-    )
-
-    with pytest.raises(RuntimeError, match="Verificación posterior al archive"):
-        main_module.finalizar_cambio_archivado("DEV-7", "dev-7")
-
-
-def test_finalizar_cambio_archivado_propaga_tool_failure(monkeypatch):
-    monkeypatch.setattr(
-        main_module,
-        "_buscar_directorio_archivado",
-        lambda change_id: f"archive/{change_id}",
-    )
-    monkeypatch.setattr(
-        main_module.ejecutar_verificacion,
-        "func",
-        lambda nombre: f"VERIFICACIÓN EXITOSA\n\nVerificación: {nombre}",
-    )
-    monkeypatch.setattr(
-        main_module.ejecutar_openspec,
-        "func",
-        lambda comando: "Éxito OpenSpec\n\nExit code: 0",
-    )
-    monkeypatch.setattr(
-        main_module.completar_tarea_linear,
-        "func",
-        lambda ticket_id, change_id: ToolFailure(
-            message="Linear rechazó Done",
-            code="COMPLETION_GATE_REJECTED",
-            retryable=False,
+    result = CrewResult(
+        ticket_id="DEV-6",
+        change_id="dev-6",
+        status="retryable_failure",
+        failure_type="test",
+        failure_stage="verification",
+        summary="tests failed",
+        verification=VerificationResult(
+            python="passed",
+            lint="passed",
+            test="failed",
+            build="skipped",
+            playwright="skipped",
+            openspec="passed",
         ),
     )
 
-    with pytest.raises(RuntimeError, match="Linear rechazó Done"):
-        main_module.finalizar_cambio_archivado("DEV-7", "dev-7")
+    main_module.save_attempt("dev-6", 1, result)
+
+    content = (change / "attempts" / "attempt-001.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "# Attempt 1" in content
+    assert "retryable_failure" in content
+    assert "tests failed" in content
+    assert '"test": "failed"' in content
+
+
+def test_save_result_writes_valid_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "PROJECT_ROOT", tmp_path)
+    change = tmp_path / "openspec" / "changes" / "dev-6"
+    change.mkdir(parents=True)
+
+    result = CrewResult(
+        ticket_id="DEV-6",
+        change_id="dev-6",
+        status="blocked",
+        failure_type="configuration",
+        failure_stage="runtime",
+        summary="Falta OPENCODE_API_KEY",
+        verification=VerificationResult(
+            python="skipped",
+            lint="skipped",
+            test="skipped",
+            build="skipped",
+            playwright="skipped",
+            openspec="skipped",
+        ),
+    )
+
+    main_module.save_result("dev-6", result)
+
+    payload = json.loads((change / "result.json").read_text(encoding="utf-8"))
+
+    assert payload["ticket_id"] == "DEV-6"
+    assert payload["status"] == "blocked"
