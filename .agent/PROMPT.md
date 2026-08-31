@@ -39,6 +39,10 @@ Keep:
 - change_id
 - branch_name
 
+Al terminar una iteracion que seleccionó un ticket, emite:
+
+<promise>TICKET:ticket_id</promise>
+
 
 ## 2. Select branch
 
@@ -87,6 +91,10 @@ cd crewai && uv run finalize_ticket ticket_id
 Read the JSON result.
 
 If status=done:
+
+Emite tambien:
+
+<promise>FINALIZED:ticket_id</promise>
 
 Stop this iteration without emitting COMPLETE.
 
@@ -188,6 +196,10 @@ Read the JSON result.
 
 If status=done:
 
+Emite tambien:
+
+<promise>FINALIZED:ticket_id</promise>
+
 Stop this iteration without emitting COMPLETE.
 
 If status=repair:
@@ -210,7 +222,15 @@ Stop.
 
 Never process more than one ticket in one Ralph iteration.
 
-Only emit:
+Los marcadores de control permitidos son:
+
+- `<promise>TICKET:ticket_id</promise>` al seleccionar un ticket;
+- `<promise>FINALIZED:ticket_id</promise>` cuando finalize;
+- `<promise>COMPLETE</promise>` cuando no haya tickets;
+- `<promise>BLOCKED:reason</promise>` ante bloqueo;
+- `<promise>DECIDE:reason</promise>` cuando se requiera una decision.
+
+Emite:
 
 <promise>COMPLETE</promise>
 
