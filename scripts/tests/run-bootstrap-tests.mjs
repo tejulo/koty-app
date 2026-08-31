@@ -4,6 +4,7 @@ const tests = process.platform === 'win32'
   ? [['powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/tests/bootstrap.test.ps1']]]
   : [
       ['bash', ['scripts/tests/bootstrap.test.sh']],
+      ['bash', ['scripts/tests/run-crew-ticket.test.sh']],
       [process.execPath, ['scripts/tests/powershell-bootstrap.test.mjs']],
     ];
 
