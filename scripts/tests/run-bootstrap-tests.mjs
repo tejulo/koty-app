@@ -5,6 +5,7 @@ const tests = process.platform === 'win32'
   : [
       ['bash', ['scripts/tests/bootstrap.test.sh']],
       ['bash', ['scripts/tests/run-crew-ticket.test.sh']],
+      ['bash', ['scripts/tests/ralph.test.sh']],
       [process.execPath, ['scripts/tests/powershell-bootstrap.test.mjs']],
     ];
 

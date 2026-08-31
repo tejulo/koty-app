@@ -11,10 +11,12 @@ cd "$ROOT"
 
 MAX_ITERATIONS=10
 ONCE=false
+UNTIL_FINALIZED=false
+MAX_ITERATIONS_SET=false
 RUNTIME_AGENT="opencode"
 
 DEFAULT_OPENCODE_AGENT="ralph-linear"
-DEFAULT_MODEL="${RALPH_MODEL:-openai/gpt-5.5}"
+DEFAULT_MODEL="${RALPH_MODEL:-openai/gpt-5.6-terra}"
 DEFAULT_VARIANT="${RALPH_VARIANT:-high}"
 
 PROMPT_FILE=".agent/PROMPT.md"
@@ -35,6 +37,9 @@ Options:
   --once
       Run exactly one iteration.
 
+  --until-finalized
+      Repeat the first selected ticket until it is finalized.
+
   -a, --agent opencode
       Runtime agent. Only opencode is supported.
 
@@ -54,6 +59,7 @@ Examples:
   ./ralph.sh
   ./ralph.sh -n 50
   ./ralph.sh --once
+  ./ralph.sh --until-finalized
 
   ./ralph.sh -n 50 -- \
     --agent ralph-linear \
@@ -74,11 +80,17 @@ while (($#)); do
     -n|--max-iterations)
       [[ $# -ge 2 ]] || die "$1 requiere un valor"
       MAX_ITERATIONS="$2"
+      MAX_ITERATIONS_SET=true
       shift 2
       ;;
 
     --once)
       ONCE=true
+      shift
+      ;;
+
+    --until-finalized)
+      UNTIL_FINALIZED=true
       shift
       ;;
 
@@ -119,6 +131,7 @@ while (($#)); do
 
     [0-9]*)
       MAX_ITERATIONS="$1"
+      MAX_ITERATIONS_SET=true
       shift
       ;;
 
@@ -137,6 +150,10 @@ done
 
 if $ONCE; then
   MAX_ITERATIONS=1
+fi
+
+if $UNTIL_FINALIZED && ! $MAX_ITERATIONS_SET; then
+  MAX_ITERATIONS=0
 fi
 
 command -v opencode >/dev/null 2>&1 \
@@ -160,7 +177,9 @@ if ((${#OPENCODE_ARGS[@]} == 0)); then
 fi
 
 
-for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
+locked_ticket=""
+
+for ((iteration = 1; MAX_ITERATIONS == 0 || iteration <= MAX_ITERATIONS; iteration++)); do
   printf '\n'
   echo "============================================================"
   echo "Ralph iteration $iteration/$MAX_ITERATIONS"
@@ -174,6 +193,12 @@ for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
   )-$timestamp.log"
 
   prompt="$(<"$PROMPT_FILE")"
+
+  if [[ -n "$locked_ticket" ]]; then
+    prompt+=$'\n\n## Ticket bloqueado\n\n'
+    prompt+="Continue only ticket $locked_ticket."
+    prompt+=$'\nResume at step 3. No consultes crew_queue ni proceses otro ticket.\n'
+  fi
 
   opencode run \
     "${OPENCODE_ARGS[@]}" \
@@ -216,11 +241,38 @@ for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
     exit 3
   fi
 
+  if $UNTIL_FINALIZED && [[ -z "$locked_ticket" ]]; then
+    ticket_marker="$(
+      grep -m1 -oE \
+        '<promise>TICKET:[A-Za-z][A-Za-z0-9]*-[0-9]+</promise>' \
+        "$log_file" || true
+    )"
+
+    [[ -n "$ticket_marker" ]] \
+      || die "No se pudo identificar el primer ticket"
+
+    locked_ticket="${ticket_marker#<promise>TICKET:}"
+    locked_ticket="${locked_ticket%</promise>}"
+  fi
+
+  if $UNTIL_FINALIZED && grep -Fq \
+    "<promise>FINALIZED:$locked_ticket</promise>" \
+    "$log_file"
+  then
+    echo
+    echo "Ralph finalized $locked_ticket"
+    exit 0
+  fi
+
   echo
   echo "Iteration $iteration finished."
 done
 
 
 echo
-echo "Reached maximum iterations: $MAX_ITERATIONS"
+if $UNTIL_FINALIZED; then
+  echo "Reached maximum iterations before finalizing $locked_ticket"
+else
+  echo "Reached maximum iterations: $MAX_ITERATIONS"
+fi
 exit 1
