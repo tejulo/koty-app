@@ -54,6 +54,9 @@ architecture_task:
 
     tasks usa checkboxes y debe indicar cambios concretos
     y tests cuando correspondan.
+    Cada criterio de aceptación debe mapearse a una tarea
+    de este ticket. No declares fuera de alcance una
+    implementación exigida por el ticket.
 
     design.md debe contener exactamente una estrategia:
 
@@ -101,6 +104,9 @@ coding_task:
     desaparecer un fallo.
 
     Ejecuta tasks.md en orden.
+    No aceptes tareas que declaren fuera de alcance una
+    implementación exigida por el ticket; corrige el plan
+    y ejecútalo.
 
     Antes de modificar un archivo existente debes leerlo.
 
@@ -183,6 +189,9 @@ review_task:
     - design respetado;
     - todas las tasks marcadas [x].
 
+    Rechaza como retryable_failure un plan que declare
+    fuera de alcance un criterio de aceptación.
+
     Ejecuta nuevamente:
     - python
     - lint
@@ -217,6 +226,10 @@ review_task:
     configuration
     requirements
     max_attempts
+
+    Devuelve un único objeto JSON sin razonamiento ni markdown.
+    verification debe contener exactamente python, lint, test,
+    build, playwright y openspec; cada valor es passed, failed o skipped.
 
     Nunca archives OpenSpec.
     Nunca modifiques Linear.

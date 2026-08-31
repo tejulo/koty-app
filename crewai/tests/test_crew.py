@@ -26,6 +26,13 @@ def test_reviewer_recibe_verificaciones_sin_mutar_linear(monkeypatch):
     assert "Buscar Tarea en Linear" not in tool_names
 
 
+def test_review_task_defers_result_validation(monkeypatch):
+    monkeypatch.setenv("OPENCODE_API_KEY", "test")
+    monkeypatch.setenv("ZEN_REVIEWER_MODEL", "openai/gpt-4o-mini")
+
+    assert KotyAppCrew().review_task().output_pydantic is None
+
+
 def test_analyst_eleva_fallos_de_herramientas(monkeypatch):
     monkeypatch.setenv("OPENCODE_API_KEY", "test")
     monkeypatch.setenv("ZEN_ANALYST_MODEL", "openai/gpt-4o-mini")
@@ -52,3 +59,33 @@ def test_arquitect_y_programer_no_reciben_tools_de_mutacion_linear(
     assert not forbidden_tools.intersection(
         tool.name for tool in crew.programer().tools
     )
+
+
+def test_task_prompts_forbid_deferring_required_implementation(
+    monkeypatch,
+):
+    monkeypatch.setenv("OPENCODE_API_KEY", "test")
+    monkeypatch.setenv("ZEN_ARCHITECT_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("ZEN_CODER_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("ZEN_REVIEWER_MODEL", "openai/gpt-4o-mini")
+    crew = KotyAppCrew()
+
+    assert "No declares fuera de alcance" in (
+        crew.architecture_task().description
+    )
+    assert "No aceptes tareas" in crew.coding_task().description
+    assert "Rechaza como retryable_failure" in (
+        crew.review_task().description
+    )
+
+
+def test_crew_writes_task_output_to_configured_log(monkeypatch):
+    monkeypatch.setenv("OPENCODE_API_KEY", "test")
+    monkeypatch.setenv("ZEN_ARCHITECT_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("ZEN_CODER_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("ZEN_REVIEWER_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("CREWAI_OUTPUT_LOG_FILE", "/tmp/crew.log")
+
+    crew = KotyAppCrew().crew()
+
+    assert crew.output_log_file == "/tmp/crew.log"

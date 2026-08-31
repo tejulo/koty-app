@@ -39,3 +39,43 @@ model IdempotencyRecord {
   @@unique([organizationId, actorId, commandType, idempotencyKey])
   @@index([organizationId, commandType])
 }
+
+// DEV-36 — Audit append-only. AuditEvent persists an immutable record of every
+// sensitive action. Inmutability is enforced at the database level by the
+// trigger defined in the matching migration, which raises an exception on
+// UPDATE or DELETE. The `transitionKey` is only used for idempotency
+// arbitration and is never exposed in HTTP responses.
+enum AuditScope {
+  PLATFORM
+  ORGANIZATION
+}
+
+enum AuditActorType {
+  USER
+  SYSTEM
+  API_KEY
+  WORKER
+}
+
+model AuditEvent {
+  id             String         @id @default(uuid())
+  scope          AuditScope
+  organizationId String?
+  actorType      AuditActorType
+  actorId        String
+  action         String
+  entityType     String
+  entityId       String
+  occurredAt     DateTime       @default(now())
+  correlationId  String
+  transitionKey  String
+  before         Json?
+  after          Json?
+  createdAt      DateTime       @default(now())
+
+  @@unique([scope, transitionKey])
+  @@index([scope, organizationId, occurredAt])
+  @@index([actorType, actorId, occurredAt])
+  @@index([action, occurredAt])
+  @@index([entityType, entityId, occurredAt])
+}

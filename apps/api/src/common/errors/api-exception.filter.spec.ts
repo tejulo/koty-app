@@ -1,4 +1,3 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { ZodError, ZodIssueCode } from 'zod';
 import { ApiExceptionFilter } from './api-exception.filter';
@@ -106,6 +105,65 @@ describe('ApiExceptionFilter', () => {
         fieldErrors: [],
         correlationId: 'test-correlation-id',
       });
+    });
+
+    it('should handle conflict (409) with AUDIT_TRANSITION_CONFLICT code (DEV-36)', () => {
+      const exception = new HttpException(
+        {
+          message: 'Audit transition conflict for a different correlationId',
+          code: ErrorCode.AUDIT_TRANSITION_CONFLICT,
+        },
+        HttpStatus.CONFLICT,
+      );
+      const host = createMockArgumentsHost();
+
+      filter.catch(exception, host as any);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(409);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        code: ErrorCode.AUDIT_TRANSITION_CONFLICT,
+        message: 'Audit transition conflict for a different correlationId',
+        fieldErrors: [],
+        correlationId: 'test-correlation-id',
+      });
+    });
+
+    it('should not downgrade an explicit AUDIT_TRANSITION_CONFLICT to IDEMPOTENCY_KEY_REUSED', () => {
+      const exception = new HttpException(
+        {
+          message: 'Audit transition conflict',
+          code: ErrorCode.AUDIT_TRANSITION_CONFLICT,
+        },
+        HttpStatus.CONFLICT,
+      );
+      const host = createMockArgumentsHost();
+
+      filter.catch(exception, host as any);
+
+      const jsonCall = mockResponse.json.mock.calls[0]?.[0];
+      expect(jsonCall.code).toBe(ErrorCode.AUDIT_TRANSITION_CONFLICT);
+      expect(jsonCall.code).not.toBe(ErrorCode.IDEMPOTENCY_KEY_REUSED);
+    });
+
+    it('should handle bad request (400) with explicit AUDIT_INVALID_FIELD code (DEV-36)', () => {
+      const exception = new HttpException(
+        {
+          message: 'Audit field is not allowed by the entity allowlist',
+          code: ErrorCode.AUDIT_INVALID_FIELD,
+          fieldErrors: [{ field: 'before.password', message: 'not allowed' }],
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+      const host = createMockArgumentsHost();
+
+      filter.catch(exception, host as any);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(400);
+      const jsonCall = mockResponse.json.mock.calls[0]?.[0];
+      expect(jsonCall.code).toBe(ErrorCode.AUDIT_INVALID_FIELD);
+      expect(jsonCall.fieldErrors).toEqual([
+        { field: 'before.password', message: 'not allowed' },
+      ]);
     });
 
     it('should handle internal error (500) with INTERNAL_ERROR code', () => {

@@ -82,6 +82,8 @@ cat >"$fixture/scripts/run-crew-ticket.sh" <<'RUNNER'
 
 [[ "${CREW_TICKET_WAIT_SECONDS:-}" == 30 ]] || exit 96
 
+printf '%s\n' "$*" >>"$MOCK_ROOT/runner-arguments"
+
 printf '%s\n' 1 >>"$MOCK_ROOT/runner-calls"
 printf '%s\n' '{"status":"approved","ticket_id":"DEV-31"}'
 RUNNER
@@ -108,6 +110,14 @@ set -e
 [[ "$(wc -l <"$fixture/runner-calls")" == 1 ]]
 [[ "$output" == *'Ralph finalized DEV-31'* ]]
 
+rm -f "$fixture/finalized"
+
+resume_output="$(PATH="$fixture/bin:$PATH" MOCK_ROOT="$fixture" \
+  "$fixture/ralph.sh" --until-finalized --resume)"
+
+[[ "$(tail -n 1 "$fixture/runner-arguments")" == 'DEV-31 --start --resume' ]]
+[[ "$resume_output" == *'Ralph finalized DEV-31'* ]]
+
 set +e
 waiting_output="$(MOCK_MODE=waiting PATH="$fixture/bin:$PATH" MOCK_ROOT="$fixture" \
   timeout 1 "$fixture/ralph.sh" --until-finalized -n 10)"
@@ -119,5 +129,30 @@ set -e
   printf 'FAIL: Ralph did not report progress before waiting\n' >&2
   exit 1
 }
+
+runner_fixture="$TEST_ROOT/runner"
+mkdir -p "$runner_fixture/bin" "$runner_fixture/crewai" "$runner_fixture/scripts"
+cp "$ROOT/scripts/run-crew-ticket.sh" "$runner_fixture/scripts/run-crew-ticket.sh"
+
+cat >"$runner_fixture/bin/uv" <<'UV'
+#!/usr/bin/env bash
+
+[[ -n "${CREWAI_OUTPUT_LOG_FILE:-}" ]] || exit 95
+[[ "$*" == *'run_crew DEV-31 --resume'* ]] || exit 94
+
+printf '%s\n' trace >"$CREWAI_OUTPUT_LOG_FILE"
+mkdir -p "$MOCK_ROOT/openspec/changes/dev-31"
+printf '%s\n' '{"status":"retryable_failure"}' >"$MOCK_ROOT/openspec/changes/dev-31/result.json"
+printf '%s\n' worker-output
+UV
+chmod +x "$runner_fixture/bin/uv"
+
+runner_output="$(PATH="$runner_fixture/bin:$PATH" MOCK_ROOT="$runner_fixture" \
+  CREW_TICKET_WAIT_SECONDS=2 "$runner_fixture/scripts/run-crew-ticket.sh" \
+  DEV-31 --start --resume)"
+
+[[ "$runner_output" == *'retryable_failure'* ]]
+[[ -s "$runner_fixture/.agent/crew/dev-31/run.log" ]]
+[[ -s "$runner_fixture/.agent/crew/dev-31/crew.log" ]]
 
 printf 'PASS: Ralph until finalized\n'

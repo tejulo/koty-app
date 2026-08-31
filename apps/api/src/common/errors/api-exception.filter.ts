@@ -27,6 +27,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
     let httpStatus = INTERNAL_ERROR;
     let code = ErrorCode.INTERNAL_ERROR;
     let message = 'An unexpected error occurred';
+    let codeExplicitlySet = false;
     const fieldErrors: FieldError[] = [];
 
     if (exception instanceof HttpException) {
@@ -53,11 +54,15 @@ export class ApiExceptionFilter implements ExceptionFilter {
           });
           message = 'Validation failed';
           code = ErrorCode.VALIDATION_ERROR;
+          codeExplicitlySet = true;
         } else if (typeof resp.code === 'string') {
           // The exception explicitly carried a pre-resolved ErrorCode (used by
-          // IdempotencyKeyReusedException). Trust it and leave the rest of the
-          // message untouched.
+          // IdempotencyKeyReusedException, AuditTransitionConflictException,
+          // AuditInvalidFieldException, etc.). Trust it and leave the rest of
+          // the message untouched. The default status-based mapping below is
+          // skipped so that the explicit code is preserved.
           code = resp.code as ErrorCode;
+          codeExplicitlySet = true;
         }
       } else if (typeof exceptionResponse === 'string') {
         message = exceptionResponse;
@@ -65,16 +70,20 @@ export class ApiExceptionFilter implements ExceptionFilter {
         message = exception.message;
       }
 
-      if (httpStatus === BAD_REQUEST) {
-        code = ErrorCode.VALIDATION_ERROR;
-      } else if (httpStatus === UNAUTHORIZED) {
-        code = ErrorCode.UNAUTHORIZED;
-      } else if (httpStatus === CONFLICT) {
-        code = ErrorCode.IDEMPOTENCY_KEY_REUSED;
-      } else if (httpStatus === NOT_FOUND) {
-        code = ErrorCode.NOT_FOUND;
-      } else if (httpStatus >= INTERNAL_ERROR) {
-        code = ErrorCode.INTERNAL_ERROR;
+      if (!codeExplicitlySet) {
+        if (httpStatus === BAD_REQUEST) {
+          code = ErrorCode.VALIDATION_ERROR;
+        } else if (httpStatus === UNAUTHORIZED) {
+          code = ErrorCode.UNAUTHORIZED;
+        } else if (httpStatus === CONFLICT) {
+          // Preserved for DEV-31 backwards compatibility: a 409 without an
+          // explicit `code` continues to map to IDEMPOTENCY_KEY_REUSED.
+          code = ErrorCode.IDEMPOTENCY_KEY_REUSED;
+        } else if (httpStatus === NOT_FOUND) {
+          code = ErrorCode.NOT_FOUND;
+        } else if (httpStatus >= INTERNAL_ERROR) {
+          code = ErrorCode.INTERNAL_ERROR;
+        }
       }
     } else if (exception instanceof ZodError) {
       httpStatus = BAD_REQUEST;

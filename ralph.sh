@@ -12,6 +12,7 @@ cd "$ROOT"
 MAX_ITERATIONS=10
 ONCE=false
 UNTIL_FINALIZED=false
+RESUME=false
 MAX_ITERATIONS_SET=false
 RUNTIME_AGENT="opencode"
 
@@ -39,6 +40,9 @@ Options:
 
   --until-finalized
       Repeat the first selected ticket until it is finalized.
+
+  --resume
+      Start a new CrewAI execution for the selected ticket.
 
   -a, --agent opencode
       Runtime agent. Only opencode is supported.
@@ -91,6 +95,11 @@ while (($#)); do
 
     --until-finalized)
       UNTIL_FINALIZED=true
+      shift
+      ;;
+
+    --resume)
+      RESUME=true
       shift
       ;;
 
@@ -157,6 +166,9 @@ if $UNTIL_FINALIZED && ! $MAX_ITERATIONS_SET; then
 fi
 
 if $UNTIL_FINALIZED; then
+  if $RESUME; then
+    exec "$ROOT/scripts/coordinate-crew-ticket.sh" --resume
+  fi
   exec "$ROOT/scripts/coordinate-crew-ticket.sh"
 fi
 

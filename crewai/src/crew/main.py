@@ -3,9 +3,11 @@ import os
 import re
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 from dotenv import load_dotenv
+from pydantic import ValidationError
 
 
 CREWAI_ROOT = Path(__file__).resolve().parents[2]
@@ -18,7 +20,11 @@ os.environ["OTEL_SDK_DISABLED"] = "true"
 
 
 from .crew import KotyAppCrew
-from .models import CrewResult, VerificationResult
+from .models import (
+    CrewExecution,
+    CrewResult,
+    VerificationResult,
+)
 from .tools.custom_tool import (
     close_local_environment,
     close_playwright_session,
@@ -110,6 +116,50 @@ def attempts_dir(change_id: str) -> Path:
         active_change(change_id)
         / "attempts"
     )
+
+
+def execution_path(change_id: str) -> Path:
+    return (
+        PROJECT_ROOT
+        / ".agent"
+        / "crew"
+        / change_id
+        / "execution.json"
+    )
+
+
+def load_execution(change_id: str) -> CrewExecution:
+    path = execution_path(change_id)
+
+    if not path.exists():
+        return CrewExecution()
+
+    return CrewExecution.model_validate_json(
+        path.read_text(encoding="utf-8")
+    )
+
+
+def save_execution(
+    change_id: str,
+    execution: CrewExecution,
+) -> None:
+    path = execution_path(change_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        execution.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+
+
+def resume_execution(change_id: str) -> CrewExecution:
+    path = execution_path(change_id)
+    execution = (
+        CrewExecution(number=load_execution(change_id).number + 1)
+        if path.exists()
+        else CrewExecution()
+    )
+    save_execution(change_id, execution)
+    return execution
 
 
 def attempt_files(
@@ -254,10 +304,101 @@ def runtime_failure(
     )
 
 
+def parse_crew_result(output: object) -> CrewResult:
+    pydantic = getattr(output, "pydantic", None)
+
+    if isinstance(pydantic, CrewResult):
+        return pydantic
+
+    if pydantic is not None:
+        return CrewResult.model_validate(pydantic)
+
+    raw = getattr(output, "raw", None)
+
+    if not isinstance(raw, str):
+        raise RuntimeError(
+            "Reviewer no devolvió un resultado estructurado"
+        )
+
+    decoder = json.JSONDecoder()
+
+    for start, character in enumerate(raw):
+        if character != "{":
+            continue
+
+        try:
+            payload, _ = decoder.raw_decode(raw[start:])
+            return CrewResult.model_validate(
+                normalize_crew_result(payload)
+            )
+        except (json.JSONDecodeError, ValidationError):
+            continue
+
+    raise RuntimeError(
+        "Reviewer no devolvió un resultado estructurado válido"
+    )
+
+
+def normalize_crew_result(payload: object) -> object:
+    if not isinstance(payload, dict):
+        return payload
+
+    verification = payload.get("verification")
+
+    if not isinstance(verification, dict):
+        return payload
+
+    checks = {
+        name: normalize_check(
+            verification.get(name)
+            if name != "openspec"
+            else verification.get(
+                "openspec",
+                verification.get(
+                    "openspec_validate",
+                    verification.get("openspec_validate_strict"),
+                ),
+            )
+        )
+        for name in (
+            "python",
+            "lint",
+            "test",
+            "build",
+            "playwright",
+            "openspec",
+        )
+    }
+
+    return {**payload, "verification": checks}
+
+
+def normalize_check(value: object) -> object:
+    if isinstance(value, dict):
+        value = value.get("result")
+
+    if not isinstance(value, str):
+        return value
+
+    value = value.casefold()
+
+    if value.startswith("pass"):
+        return "passed"
+
+    if value.startswith("fail"):
+        return "failed"
+
+    if value.startswith(("skip", "not_required")):
+        return "skipped"
+
+    return value
+
+
 def max_attempts_result(
     ticket_id: str,
     change_id: str,
     max_attempts: int,
+    execution: CrewExecution,
 ) -> CrewResult:
     return CrewResult(
         ticket_id=ticket_id,
@@ -267,7 +408,8 @@ def max_attempts_result(
         failure_stage="orchestrator",
         summary=(
             f"Se alcanzaron {max_attempts} "
-            "intentos sin completar el ticket."
+            f"intentos en la ejecución {execution.number} "
+            "sin completar el ticket."
         ),
         verification=VerificationResult(
             python="skipped",
@@ -280,12 +422,35 @@ def max_attempts_result(
     )
 
 
-def run():
-    raw_id = (
-        sys.argv[1]
-        if len(sys.argv) > 1
-        else input("Ticket: ")
+def execution_attempts(
+    execution: CrewExecution,
+) -> tuple[int, int]:
+    if execution.last_failure_type == "infrastructure":
+        return (
+            execution.infrastructure_attempts,
+            int(
+                os.environ.get(
+                    "MAX_INFRASTRUCTURE_ATTEMPTS",
+                    "2",
+                )
+            ),
+        )
+
+    return (
+        execution.attempts,
+        int(
+            os.environ.get(
+                "MAX_TICKET_ATTEMPTS",
+                "3",
+            )
+        ),
     )
+
+
+def run():
+    arguments = sys.argv[1:]
+    raw_id = arguments[0] if arguments else input("Ticket: ")
+    resume = "--resume" in arguments[1:]
 
     ticket_id, change_id = normalize(
         raw_id
@@ -312,20 +477,20 @@ def run():
         )
         return
 
-    attempt = next_attempt(change_id)
-
-    max_attempts = int(
-        os.environ.get(
-            "MAX_TICKET_ATTEMPTS",
-            "3",
-        )
+    execution = (
+        resume_execution(change_id)
+        if resume
+        else load_execution(change_id)
     )
 
-    if attempt > max_attempts:
+    attempts, max_attempts = execution_attempts(execution)
+
+    if attempts >= max_attempts:
         result = max_attempts_result(
             ticket_id,
             change_id,
             max_attempts,
+            execution,
         )
 
         save_result(
@@ -339,6 +504,7 @@ def run():
         return
 
     try:
+        record_attempt = next_attempt(change_id)
         output = (
             KotyAppCrew()
             .crew()
@@ -346,7 +512,7 @@ def run():
                 inputs={
                     "ticket_id": ticket_id,
                     "change_id": change_id,
-                    "attempt": attempt,
+                    "attempt": execution.attempts + 1,
                     "last_attempt_path": (
                         last_attempt(change_id)
                     ),
@@ -354,21 +520,7 @@ def run():
             )
         )
 
-        if output.pydantic is None:
-            raise RuntimeError(
-                "Reviewer no devolvió "
-                "CrewResult estructurado"
-            )
-
-        if isinstance(
-            output.pydantic,
-            CrewResult,
-        ):
-            result = output.pydantic
-        else:
-            result = CrewResult.model_validate(
-                output.pydantic
-            )
+        result = parse_crew_result(output)
 
         if (
             result.ticket_id.upper()
@@ -386,6 +538,7 @@ def run():
             )
 
     except Exception as error:
+        traceback.print_exc()
         result = runtime_failure(
             ticket_id,
             change_id,
@@ -402,9 +555,15 @@ def run():
     )
 
     if result.status != "approved":
+        execution.last_failure_type = result.failure_type
+        if result.failure_type == "infrastructure":
+            execution.infrastructure_attempts += 1
+        else:
+            execution.attempts += 1
+        save_execution(change_id, execution)
         save_attempt(
             change_id,
-            attempt,
+            record_attempt,
             result,
         )
 

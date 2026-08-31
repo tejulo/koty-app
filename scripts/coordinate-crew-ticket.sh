@@ -5,6 +5,11 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 export CREW_TICKET_WAIT_SECONDS="${CREW_TICKET_WAIT_SECONDS:-30}"
 RETRY_DELAY_SECONDS="${CREW_RETRY_DELAY_SECONDS:-5}"
+RESUME=false
+
+if [[ "${1:-}" == "--resume" ]]; then
+  RESUME=true
+fi
 
 json_field() {
   python -c 'import json, sys; print(json.load(sys.stdin).get(sys.argv[1], ""))' "$1"
@@ -88,7 +93,12 @@ while true; do
       ;;
   esac
 
-  worker="$("$ROOT/scripts/run-crew-ticket.sh" "$ticket_id" --start)"
+  worker_args=("$ticket_id" --start)
+  if $RESUME; then
+    worker_args+=(--resume)
+    RESUME=false
+  fi
+  worker="$("$ROOT/scripts/run-crew-ticket.sh" "${worker_args[@]}")"
   worker_status="$(printf '%s' "$worker" | json_field status)"
 
   case "$worker_status" in

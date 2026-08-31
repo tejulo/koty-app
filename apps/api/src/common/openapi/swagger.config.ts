@@ -23,4 +23,5 @@ export const swaggerConfig = new DocumentBuilder()
   .setDescription('API para la aplicación Koty - Contrato Base v1')
   .setVersion('1.0')
   .addTag('health', 'Health check endpoint')
+  .addTag('audit', 'Consulta y registro de auditoría append-only')
   .build();

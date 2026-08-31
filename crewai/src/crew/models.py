@@ -44,3 +44,10 @@ class CrewResult(BaseModel):
     failure_stage: str | None = None
     summary: str
     verification: VerificationResult
+
+
+class CrewExecution(BaseModel):
+    number: int = Field(default=1, ge=1)
+    attempts: int = Field(default=0, ge=0)
+    infrastructure_attempts: int = Field(default=0, ge=0)
+    last_failure_type: str | None = None

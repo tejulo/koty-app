@@ -14,6 +14,22 @@ export const idempotencyKeyReusedExample = {
   correlationId: '550e8400-e29b-41d4-a716-446655440000',
 };
 
+export const auditInvalidFieldExample = {
+  code: 'AUDIT_INVALID_FIELD',
+  message: 'Field is not allowed by the entity allowlist',
+  fieldErrors: [{ field: 'before.password', message: 'not allowed' }],
+  correlationId: '550e8400-e29b-41d4-a716-446655440000',
+};
+
+export const auditTransitionConflictExample = {
+  code: 'AUDIT_TRANSITION_CONFLICT',
+  message:
+    'Audit transition conflict: a record with the same (scope, transitionKey) ' +
+    'exists for a different correlationId',
+  fieldErrors: [],
+  correlationId: '550e8400-e29b-41d4-a716-446655440000',
+};
+
 export const errorResponseSchema = {
   type: 'object',
   required: ['code', 'message', 'fieldErrors', 'correlationId'],
@@ -29,6 +45,8 @@ export const errorResponseSchema = {
         'BAD_REQUEST',
         'UNAUTHORIZED',
         'IDEMPOTENCY_KEY_REUSED',
+        'AUDIT_TRANSITION_CONFLICT',
+        'AUDIT_INVALID_FIELD',
       ],
     },
     message: {
@@ -53,6 +71,14 @@ export const errorResponseSchema = {
       summary: 'Conflicto por reutilización de clave de idempotencia',
       value: idempotencyKeyReusedExample,
     },
+    auditInvalidField: {
+      summary: 'Campo no permitido en la allowlist de auditoría',
+      value: auditInvalidFieldExample,
+    },
+    auditTransitionConflict: {
+      summary: 'Conflicto de transición de auditoría (DEV-36)',
+      value: auditTransitionConflictExample,
+    },
   },
 };
 
@@ -63,4 +89,24 @@ export const idempotencyKeyReusedSchema = {
     'Respuesta de error cuando una clave de idempotencia se reutiliza con un cuerpo distinto',
   properties: errorResponseSchema.properties,
   example: idempotencyKeyReusedExample,
+};
+
+export const auditInvalidFieldSchema = {
+  type: 'object',
+  required: ['code', 'message', 'fieldErrors', 'correlationId'],
+  description:
+    'Respuesta de error cuando un campo registrado en before/after no está ' +
+    'en la allowlist del entityType correspondiente',
+  properties: errorResponseSchema.properties,
+  example: auditInvalidFieldExample,
+};
+
+export const auditTransitionConflictSchema = {
+  type: 'object',
+  required: ['code', 'message', 'fieldErrors', 'correlationId'],
+  description:
+    'Respuesta de error cuando una transición de auditoría colisiona con ' +
+    'un registro existente con un correlationId distinto',
+  properties: errorResponseSchema.properties,
+  example: auditTransitionConflictExample,
 };

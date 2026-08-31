@@ -8,6 +8,8 @@ import {
 } from './common/openapi/swagger.config';
 import { ApiExceptionFilter } from './common/errors/api-exception.filter';
 import {
+  auditInvalidFieldSchema,
+  auditTransitionConflictSchema,
   errorResponseSchema,
   fieldErrorSchema,
   idempotencyKeyReusedSchema,
@@ -55,6 +57,8 @@ async function bootstrap() {
     FieldError: fieldErrorSchema,
     HealthResponse: healthResponseSchema,
     IdempotencyKeyReusedError: idempotencyKeyReusedSchema,
+    AuditInvalidFieldError: auditInvalidFieldSchema,
+    AuditTransitionConflictError: auditTransitionConflictSchema,
   };
 
   document.components.parameters = {

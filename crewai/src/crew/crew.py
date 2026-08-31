@@ -18,7 +18,6 @@ from crewai.tools.tool_failure import (
 )
 
 from .models import (
-    CrewResult,
     TesterResult,
 )
 from .tools.custom_tool import (
@@ -213,28 +212,35 @@ class KotyAppCrew:
         return Task(
             config=self.tasks_config[
                 "review_task"
-            ],
-            output_pydantic=CrewResult,
+            ]
         )
 
     @crew
     def crew(self) -> Crew:
-        return Crew(
-            agents=[
+        options = {
+            "agents": [
                 self.analyst(),
                 self.arquitect(),
                 self.programer(),
                 self.tester(),
                 self.reviewer(),
             ],
-            tasks=[
+            "tasks": [
                 self.analysis_task(),
                 self.architecture_task(),
                 self.coding_task(),
                 self.testing_task(),
                 self.review_task(),
             ],
-            process=Process.sequential,
-            verbose=VERBOSE,
-            tracing=False,
+            "process": Process.sequential,
+            "verbose": VERBOSE,
+            "tracing": False,
+        }
+        log_file = os.environ.get("CREWAI_OUTPUT_LOG_FILE")
+
+        if log_file:
+            options["output_log_file"] = log_file
+
+        return Crew(
+            **options,
         )

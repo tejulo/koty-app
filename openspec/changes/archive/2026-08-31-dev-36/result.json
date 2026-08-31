@@ -1,0 +1,16 @@
+{
+  "ticket_id": "DEV-36",
+  "change_id": "dev-36",
+  "status": "approved",
+  "failure_type": "none",
+  "failure_stage": null,
+  "summary": "Cambio DEV-36 (auditoría append-only) completamente verificado. Proposal cubre los 10 puntos de alcance, Fuera de Alcance, Impacto, Riesgos y trazabilidad con Incremento 0 (CONTEXT.md secciones 3.1, 4.1, 4.2, 12, BND-IAM-*) y resuelve las 7 ambigüedades reconocidas. Design presenta 10 Decisiones de Diseño y una única sección 'Verification Strategy - Browser E2E: not_required' con razón justificada (superficie 100% API+PostgreSQL, cobertura por integración con base aislada más rigurosa que E2E de navegador). Spec incluye 8 Requirements con 27 Scenarios verificables cubriendo estructura mínima, allowlist+exclusión de secretos, inmutabilidad append-only (UPDATE/DELETE/REVOKE/service sin mutadores), búsqueda con aislamiento por organización, idempotencia por (scope, transitionKey), propagación de correlationId, no exposición de transitionKey y mapeo del código AUDIT_TRANSITION_CONFLICT sin debilitar IDEMPOTENCY_KEY_REUSED. Tasks marcadas [x] en Fase A (A.1–A.4) y Fase B (1.1–9.1) con tabla 1-a-1 entre los 5 criterios de aceptación (CA1–CA5), Requirements y tareas. Implementación verificada: schema Prisma con enums AuditScope/AuditActorType y modelo AuditEvent con @@unique([scope, transitionKey]) y los 4 índices secundarios; migración 20260831022809_add_audit_event con trigger BEFORE UPDATE OR DELETE y REVOKE; AuditService con record/search (sin update/delete/patch/truncate), 12 tests unitarios verdes; AuditController con GET/POST proyectados por Zod sin transitionKey; AuditEchoController gated por ENABLE_AUDIT_ECHO y habilitado en global-setup; integration spec cubre los 6 escenarios requeridos. python/lint/test/build finalizan con exit code 0 (62/62 tests verdes) y openspec validate dev-36 --strict --no-interactive reporta 'Change dev-36 is valid'.",
+  "verification": {
+    "python": "passed",
+    "lint": "passed",
+    "test": "passed",
+    "build": "passed",
+    "playwright": "skipped",
+    "openspec": "passed"
+  }
+}

@@ -48,6 +48,8 @@ export async function setup(): Promise<void> {
   process.env['TEST_DB_NAME'] = ISOLATED_DB_NAME;
   process.env['INTEGRATION_TEST'] = 'true';
   process.env['ENABLE_IDEMPOTENCY_ECHO'] = 'true';
+  // DEV-36: enable the audit smoke controller for integration tests.
+  process.env['ENABLE_AUDIT_ECHO'] = 'true';
 
   const apply = spawnSync(
     'pnpm',

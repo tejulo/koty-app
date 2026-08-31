@@ -1,0 +1,1490 @@
+2026-08-31 14:04:36: task_name="analysis_task", task="Usa obligatoriamente 'Buscar Tarea en Linear' para obtener 'DEV-36'.
+El orquestador ya debió mover el ticket a In Progress.
+Analiza: - objetivo; - alcance; - requisitos funcionales; - criterios de aceptación; - restricciones; - dependencias; - ambigüedades.
+No inventes información.
+Si el ticket no puede recuperarse o contiene una ambigüedad que impide implementarlo, indícalo claramente.
+", agent="Requirements Analyst", status="started"
+2026-08-31 14:05:03: task_name="analysis_task", task="Usa obligatoriamente 'Buscar Tarea en Linear' para obtener 'DEV-36'.
+El orquestador ya debió mover el ticket a In Progress.
+Analiza: - objetivo; - alcance; - requisitos funcionales; - criterios de aceptación; - restricciones; - dependencias; - ambigüedades.
+No inventes información.
+Si el ticket no puede recuperarse o contiene una ambigüedad que impide implementarlo, indícalo claramente.
+", agent="Requirements Analyst", status="completed", output="## Análisis de Requisitos - DEV-36: Registrar una auditoría append-only
+
+### Objetivo
+Implementar un sistema de auditoría inmutable (append-only) que permita a administradores autorizados consultar el historial de acciones sensibles realizadas en la plataforma, garantizando que no se expongan secretos y que el historial no pueda ser alterado.
+
+### Alcance
+- Registro de eventos de auditoría con estructura definida
+- Almacenamiento inmutable de eventos (no editables ni eliminables desde la aplicación)
+- Capacidad de búsqueda y consulta de eventos por parte de usuarios autorizados
+- Filtrado de información sensible en los registros de cambios
+
+### Requisitos Funcionales
+
+**RF1: Estructura del evento de auditoría**
+Cada evento debe contener:
+- Alcance (plataforma u organización)
+- Actor tipado (quién realizó la acción)
+- Acción realizada
+- Entidad afectada
+- Instante (timestamp)
+- Correlación (ID de correlación/transacción)
+
+**RF2: Registro de cambios**
+Los eventos deben incluir cambios "antes" y "después" utilizando:
+- Una lista permitida (allowlist) de campos
+- Exclusión obligatoria de: contraseñas, tokens, sesiones y contenido completo
+
+**RF3: Inmutabilidad**
+Los eventos de auditoría no pueden ser editados ni eliminados desde la aplicación.
+
+**RF4: Consulta y búsqueda**
+Un usuario autorizado debe poder buscar eventos por:
+- Actor
+- Acción
+- Entidad
+- Rango de fechas
+
+**RF5: Idempotencia**
+Un reintento idempotente no debe crear un segundo evento para la misma transición.
+
+### Criterios de Aceptación
+1. ✓ Cada evento declara alcance de plataforma u organización, actor tipado, acción, entidad, instante y correlación
+2. ✓ Los cambios antes y después usan una lista permitida y excluyen contraseñas, tokens, sesiones y contenido completo
+3. ✓ Los eventos no se pueden editar ni eliminar desde la aplicación
+4. ✓ Un usuario autorizado puede buscar por actor, acción, entidad y rango de fechas
+5. ✓ Un reintento idempotente no crea un segundo evento para la misma transición
+
+### Restricciones
+- **Seguridad**: No exponer contraseñas, tokens, sesiones ni contenido completo en los registros
+- **Inmutabilidad**: El sistema debe garantizar que los eventos no puedan ser modificados o eliminados
+- **Autorización**: Solo usuarios autorizados pueden consultar los eventos de auditoría
+- **Idempotencia**: El sistema debe prevenir duplicados en caso de reintentos
+
+### Dependencias
+- Sistema de autenticación y autorización (para validar usuarios autorizados)
+- Mecanismo de almacenamiento persistente (para garantizar inmutabilidad)
+- Definición de "acciones sensibles" que deben ser auditadas
+- Definición de la lista permitida de campos para registrar cambios
+
+### Ambigüedades Identificadas
+
+**A1: Definición de "actor tipado"**
+No se especifica qué tipos de actores existen (usuario, sistema, servicio, etc.) ni su estructura.
+
+**A2: Lista permitida de campos**
+No se define cuáles campos específicos están en la allowlist para registrar cambios antes/después.
+
+**A3: Acciones sensibles**
+No se especifica qué acciones se consideran "sensibles" y deben ser auditadas.
+
+**A4: Mecanismo de idempotencia**
+No se define cómo se determina que un reintento es para "la misma transición" (¿hash? ¿IDempotency key? ¿timestamp + actor + acción?).
+
+**A5: Alcance de "plataforma u organización"**
+No se clarifica la diferencia entre eventos de alcance plataforma vs organización ni cómo se estructuran.
+
+**A6: Almacenamiento inmutable**
+No se especifica si se requiere:
+- Base de datos con triggers/restricciones
+- Append-only log
+- Blockchain/WORM storage
+- Auditoría a nivel de base de datos
+
+**A7: Retención de datos**
+No se define política de retención de eventos de auditoría.
+
+---
+
+**Estado del ticket**: In Progress  
+**Prioridad**: Urgent (1)  
+**Proyecto**: koty-app  
+**Milestone**: Incremento 0 - Plataforma segura
+
+**Conclusión**: El ticket es implementable pero requiere aclarar las ambigüedades A1-A7 antes de proceder con el diseño detallado. Las ambigüedades A2 (lista permitida) y A3 (acciones sensibles) son críticas para la implementación."
+2026-08-31 14:05:03: task_name="architecture_task", task="Trabaja sobre el cambio OpenSpec 'dev-36'.
+Lee CONTEXT.md.
+Si 'openspec/changes/dev-36/attempts/attempt-003.md' es distinto de 'NONE', lee también ese archivo y considera el fallo documentado.
+Inspecciona únicamente las partes relevantes del repositorio.
+No inspecciones: .venv, node_modules, .git, .next, dist, build, __pycache__, .playwright-cli.
+Crea o actualiza: - openspec/changes/dev-36/proposal.md - openspec/changes/dev-36/specs/ - openspec/changes/dev-36/design.md - openspec/changes/dev-36/tasks.md
+proposal define alcance.
+specs define Requirements y Scenarios verificables.
+design define las decisiones técnicas.
+tasks usa checkboxes y debe indicar cambios concretos y tests cuando correspondan. Cada criterio de aceptación debe mapearse a una tarea de este ticket. No declares fuera de alcance una implementación exigida por el ticket.
+design.md debe contener exactamente una estrategia:
+## Verification Strategy - Browser E2E: required
+o:
+## Verification Strategy - Browser E2E: not_required
+Incluye una razón breve.
+Usa required cuando exista comportamiento verificable mediante navegador: navegación, formularios, autenticación, UI o integración frontend/API visible.
+Finalmente ejecuta:
+validate dev-36 --strict --no-interactive
+Corrige los artifacts si falla.
+Nunca archives el cambio.
+", agent="Software Architect", status="started"
+2026-08-31 14:06:38: task_name="architecture_task", task="Trabaja sobre el cambio OpenSpec 'dev-36'.
+Lee CONTEXT.md.
+Si 'openspec/changes/dev-36/attempts/attempt-003.md' es distinto de 'NONE', lee también ese archivo y considera el fallo documentado.
+Inspecciona únicamente las partes relevantes del repositorio.
+No inspecciones: .venv, node_modules, .git, .next, dist, build, __pycache__, .playwright-cli.
+Crea o actualiza: - openspec/changes/dev-36/proposal.md - openspec/changes/dev-36/specs/ - openspec/changes/dev-36/design.md - openspec/changes/dev-36/tasks.md
+proposal define alcance.
+specs define Requirements y Scenarios verificables.
+design define las decisiones técnicas.
+tasks usa checkboxes y debe indicar cambios concretos y tests cuando correspondan. Cada criterio de aceptación debe mapearse a una tarea de este ticket. No declares fuera de alcance una implementación exigida por el ticket.
+design.md debe contener exactamente una estrategia:
+## Verification Strategy - Browser E2E: required
+o:
+## Verification Strategy - Browser E2E: not_required
+Incluye una razón breve.
+Usa required cuando exista comportamiento verificable mediante navegador: navegación, formularios, autenticación, UI o integración frontend/API visible.
+Finalmente ejecuta:
+validate dev-36 --strict --no-interactive
+Corrige los artifacts si falla.
+Nunca archives el cambio.
+", agent="Software Architect", status="completed", output="<think>Let me check the existing state of the dev-36 OpenSpec change. From my exploration:
+
+1. **proposal.md** exists and is comprehensive
+2. **design.md** exists with Verification Strategy `Browser E2E: not_required` and a reason
+3. **tasks.md** exists with full traceability
+4. **specs/audit-append-only/spec.md** exists with Requirements and Scenarios
+
+The `validate dev-36 --strict --no-interactive` returned exit code 0 with "Change 'dev-36' is valid".
+
+Looking at the attempt-003.md, the failure was an infrastructure issue where the reviewer didn't return a structured valid result - but the OpenSpec validation itself passed.
+
+Let me verify a few things:
+- The `proposal.md` content references specific files and even points to the validation command - which all matches.
+- The `design.md` has exactly one Verification Strategy section with `Browser E2E: not_required` and a reason.
+- The `tasks.md` has checkboxes and maps each acceptance criterion to a task.
+- The `specs/audit-append-only/spec.md` has Requirements and Scenarios.
+
+All looks consistent. Let me confirm there are no issues. The validate returned 0 successfully.
+
+Let me also check the specs section more thoroughly to make sure there are no problems with the format.
+
+Looking at the structure:
+- proposal.md has `## Objetivo`, `## Alcance`, `## Fuera de Alcance`, etc.
+- design.md has `## Decisiones de Diseño`, `## Verification Strategy - Browser E2E: not_required`, `## Resumen de Archivos a Crear/Modificar`
+- tasks.md has `## Fase A — Artefactos OpenSpec`, `## Fase B — Implementación`, checkboxes
+- specs/audit-append-only/spec.md has `## Purpose`, `## ADDED Requirements`, scenarios using `#### Scenario:`
+
+Everything looks good. The OpenSpec validation passed.
+
+Now I need to summarize the artifacts and the validation result. Since the user said "you MUST return the actual complete content as the final answer, not a summary", I should return the complete content of the artifacts.
+
+Wait, let me re-read: "This is the expected criteria for your final answer: Resumen de artifacts creados o actualizados y resultado de OpenSpec validate."
+
+But also: "you MUST return the actual complete content as the final answer, not a summary."
+
+There's a tension. The "expected criteria" says "Resumen" (summary), but the instruction says return actual complete content. The last word wins - I should return the actual complete content.
+
+But wait, the artifacts already exist and validate passed. So actually the task is to:
+1. Read CONTEXT.md ✓
+2. Read attempt-003.md ✓
+3. Inspect relevant repo parts ✓
+4. Create or update proposal.md, specs/, design.md, tasks.md
+5. Run validate dev-36 --strict --no-interactive ✓ (passed)
+
+Since the artifacts already exist and are valid, I don't need to update them. I should just confirm the state.
+
+Actually, looking more carefully - the task is to "Crear o actualizar" (create or update). So if the artifacts already exist and are correct, I can leave them as is.
+
+Let me check if there's anything to improve. Looking at the design.md, the verification strategy section says:
+"## Verification Strategy - Browser E2E: not_required
+La superficie del cambio es 100% API HTTP y persistencia PostgreSQL..."
+
+This is correct format - exactly one strategy with a reason.
+
+The validate passed. So I'm done. Let me return the complete content of the artifacts as the final answer.
+
+Actually wait - let me look more carefully at the actual requirement of the user. The user said:
+"Crea o actualiza: - openspec/changes/dev-36/proposal.md - openspec/changes/dev-36/specs/ - openspec/changes/dev-36/design.md - openspec/changes/dev-36/tasks.md"
+"Finalmente ejecuta: validate dev-36 --strict --no-interactive"
+
+The artifacts already exist and are valid. Since the user said "Crea o actualiza", and they exist already and are valid, I don't need to create or update them. The validate already passed.
+
+But the user asked me to return "the actual complete content as the final answer, not a summary". This is a strange requirement if I don't need to modify anything. Let me just confirm the state and show the validation result.
+
+Looking at the previous attempts:
+- attempt-001: failed with Pydantic validation error (infrastructure issue with the reviewer)
+- attempt-002: failed with Pydantic validation error (infrastructure issue with the reviewer)  
+- attempt-003: failed with "Reviewer no devolvió un resultado estructurado válido" (infrastructure issue)
+
+So all attempts failed due to infrastructure issues with the review tool, not because the OpenSpec change was invalid.
+
+The current state shows that:
+1. All artifacts exist and are correct
+2. `openspec validate dev-36 --strict --no-interactive` passes
+
+So my task is essentially to confirm the artifacts and report the validation result. Let me return the complete contents of all artifacts.
+
+Actually, the user said "no cambias requisitos para ocultar un fallo anterior" - don't change requirements to hide a previous failure. Since the artifacts are valid and validate passes, I shouldn't change them.
+
+Let me confirm once more with a final validation check.
+
+Actually, looking at the rules:
+- design.md must contain EXACTLY one strategy: "## Verification Strategy - Browser E2E: required" or "## Verification Strategy - Browser E2E: not_required"
+- Include a brief reason.
+
+My design.md contains:
+"## Verification Strategy - Browser E2E: not_required
+La superficie del cambio es 100% API HTTP y persistencia PostgreSQL. El endpoint..."
+
+This satisfies the rule.
+
+OK, I'm confident the state is correct. Let me return the complete content of the artifacts as the final answer.</think>
+
+He inspeccionado `CONTEXT.md`, el intento fallido `attempt-003.md` (que fue un fallo de infraestructura del revisor — el reviewer no devolvió un resultado estructurado válido, no un fallo del cambio OpenSpec) y el estado actual de los artefactos del cambio `dev-36`. Los artefactos ya existen, son coherentes con `CONTEXT.md` (Incremento 0 — Plataforma segura, sección 12 de auditoría, secciones 3.1/4.1/4.2, casos `BND-IAM-*`) y con los patrones de DEV-6/DEV-7/DEV-31, y `openspec validate dev-36 --strict --no-interactive` ya pasa con código 0. No he modificado los requisitos para ocultar el fallo previo (era de infraestructura); confirmo el contenido completo de los artefactos y el resultado de validación.
+
+---
+
+# `openspec/changes/dev-36/proposal.md`
+
+```markdown
+# Proposal: DEV-36 — Registrar una auditoría append-only
+
+## Problema
+
+El Incremento 0 de `koty-app` (ver `CONTEXT.md`, sección 21, "Incremento 0 — Plataforma
+segura") establece como puerta de aceptación que la **auditoría base** forme parte de
+la Plataforma segura. Hasta ahora:
+
+- `apps/api/prisma/schema.prisma` solo declara `SchemaMigrationMarker` e
+  `IdempotencyRecord`. No existe un modelo `AuditEvent` que persista quién hizo qué.
+- `apps/api/src/common/idempotency/idempotency.service.ts` define `IdempotencyService`
+  para deduplicar comandos sensibles por `(organizationId, actorId, commandType,
+  idempotencyKey)`, pero ese mecanismo no produce un registro auditable del efecto:
+  solo guarda la respuesta confirmada.
+- No existe ningún servicio, controlador ni endpoint que permita a un administrador
+  autorizado consultar el historial de acciones sensibles (creación de
+  organizaciones, invitaciones, asignación de membresías, etc.).
+- No existe ninguna restricción de base de datos que impida modificar o borrar un
+  evento desde la propia aplicación. La única "inmutabilidad" disponible es la
+  convención de no invocar `UPDATE`/`DELETE`, que es trivialmente eludible.
+- No hay una lista permitida de campos auditables ni una exclusión obligatoria de
+  datos sensibles (`password`, `token`, `session`, contenido completo), por lo que
+  es posible registrar accidentalmente secretos en el cuerpo `before`/`after`.
+
+En consecuencia, un actor no autorizado podría borrar evidencia, y un programador
+descuidado podría persistir contraseñas o tokens en el log. El ticket DEV-36 exige
+un sistema de auditoría append-only verificable que cubra estructura mínima,
+registro de cambios antes/después, inmutabilidad, búsqueda e idempotencia,
+alineado con los casos `BND-IAM-*` y la regla "ningún usuario puede consultar o
+modificar datos de otra organización" del Incremento 0.
+
+## Objetivo
+
+Introducir en `apps/api` un sistema de **auditoría append-only** que permita a un
+administrador autorizado consultar quién realizó cada acción sensible sin exponer
+secretos ni permitir alterar el historial, de manera que:
+
+1. Cada acción sensible quede registrada como un evento inmutable con alcance
+   (plataforma u organización), actor tipado, acción, entidad, instante y
+   correlación.
+2. Los cambios antes/después se limiten a una **lista permitida** explícita por tipo
+   de entidad y excluyan de forma obligatoria contraseñas, tokens, sesiones y
+   contenido completo.
+3. Los eventos no puedan ser editados ni eliminados desde la aplicación, ni por la
+   propia API ni por un `UPDATE`/`DELETE` accidental ejecutado contra la base de
+   datos de aplicación.
+4. Un administrador autorizado pueda buscar eventos por actor, acción, entidad y
+   rango de fechas, con aislamiento obligatorio por organización (un administrador
+   de la organización `A` nunca debe poder descubrir identificadores válidos de la
+   organización `B`).
+5. Un reintento idempotente de la misma transición no produzca un segundo evento.
+
+## Alcance
+
+1. **Modelo Prisma `AuditEvent`**
+   - Añadir a `apps/api/prisma/schema.prisma` un modelo `AuditEvent` con los campos:
+     `id`, `scope` (`PLATFORM` | `ORGANIZATION`), `organizationId` (nullable para
+     `PLATFORM`), `actorType` (`USER` | `SYSTEM` | `API_KEY` | `WORKER`), `actorId`,
+     `action` (string), `entityType` (string), `entityId` (string), `occurredAt`
+     (`DateTime`), `correlationId` (string), `transitionKey` (string, hash),
+     `before` (`Json`), `after` (`Json`), `createdAt`.
+   - Enums `AuditScope` y `AuditActorType` declarados en el mismo `schema.prisma`.
+   - Constraints: `@@unique([scope, transitionKey])` para idempotencia por
+     `(scope, transitionKey)`; índices secundarios para búsqueda eficiente.
+   - `transitionKey` **no** se expone en respuestas HTTP; solo se persiste para
+     arbitraje interno.
+
+2. **Migración reproducible**
+   - Crear `apps/api/prisma/migrations/<timestamp>_add_audit_event/migration.sql`
+     siguiendo el flujo de DEV-6: `pnpm db:migrate:dev --name add_audit_event`
+     aplicada con `pnpm db:migrate:deploy` y verificada con `pnpm db:verify`.
+   - La migración añade:
+     - Tabla `AuditEvent` con sus columnas y restricciones.
+     - Función `audit_event_block_mutations()` y trigger
+       `audit_event_append_only` (`BEFORE UPDATE OR DELETE`) que lanza `EXCEPTION`
+       con el mensaje "AuditEvent is append-only".
+     - `REVOKE UPDATE, DELETE ON TABLE "AuditEvent" FROM PUBLIC` para reforzar la
+       inmutabilidad a nivel de permisos PostgreSQL.
+
+3. **Lista permitida y exclusión de secretos**
+   - Definir un mapa `AUDIT_CHANGE_FIELDS: Readonly<Record<EntityType, readonly
+     string[]>>` en `apps/api/src/audit/audit.constants.ts`, que liste los únicos
+     campos que pueden aparecer en `before`/`after` para cada `entityType`.
+   - Definir `EXCLUDED_CHANGE_FIELDS: readonly string[]` con valores literales
+     (`password`, `token`, `session`, `content`, `secret`, `apiKey`, `accessToken`,
+     `refreshToken`, `cookies`, `body`, `payload`) y un predicado
+     `isExcludedChangeField(name)` que detecta coincidencias por nombre
+     case-insensitive y por sufijo (`*password`, `*token`, `*secret`).
+   - `AuditService.record` debe:
+     1. Validar que cada clave de `before`/`after` pertenece a
+        `AUDIT_CHANGE_FIELDS[entityType]`. Si no, lanzar
+        `AuditInvalidFieldException` mapeada a `400 VALIDATION_ERROR`.
+     2. Eliminar cualquier clave que case con `EXCLUDED_CHANGE_FIELDS` **antes** de
+        la validación de allowlist. Si tras el filtrado `before` o `after` queda
+        vacío, se persiste el valor como `null`.
+
+4. **Idempotencia por `(scope, transitionKey)`**
+   - `transitionKey` se calcula como
+     `sha256("${scope}|${action}|${entityType}|${entityId}|${correlationId}")`
+     (delegando en `canonicalStringify` de DEV-31).
+   - El constraint único en base de datos es el mecanismo de arbitraje entre
+     instancias de la API y reintentos del cliente.
+   - `AuditService.record` inserta el evento; si la inserción viola el
+     `@@unique([scope, transitionKey])` y la huella coincide, se considera idempotente
+     y se devuelve el evento existente con `created: false`. Si la huella difiere
+     (caso patológico por `correlationId` mutado manualmente), se lanza
+     `AuditTransitionConflictException` mapeada a `409 AUDIT_TRANSITION_CONFLICT`.
+   - El servicio **nunca** actualiza ni borra filas de `AuditEvent`.
+
+5. **Servicio `AuditService`**
+   - `record(input: AuditEventInput): Promise<AuditEventRecord>` registra un evento
+     aplicando allowlist + exclusión de secretos + idempotencia + propagación de
+     `correlationId`.
+   - `search(query: AuditSearchQuery): Promise<AuditSearchPage>` devuelve una página
+     con `items`, `total`, `limit`, `offset`. Soporta filtros por `actorType`,
+     `actorId`, `action`, `entityType`, `entityId`, `from`, `to`. Aísla por
+     `organizationId` (los administradores solo ven su organización; el
+     superadministrador de plataforma ve `scope = PLATFORM` y, opcionalmente,
+     cualquier organización mediante flag explícito).
+   - Ningún método expone `transitionKey` en la respuesta.
+
+6. **Controlador HTTP `AuditController`**
+   - `GET /api/v1/audit-events` con query params validados por Zod (`actorType`,
+     `actorId`, `action`, `entityType`, `entityId`, `from`, `to`, `limit`, `offset`).
+     Requiere permiso `audit:read` y, salvo para superadministrador con flag
+     explícito, restringe a `organizationId` del actor autenticado.
+   - `POST /api/v1/audit-events` con cuerpo validado por Zod para filtros complejos
+     (alternativa opcional al GET cuando los filtros excedan la longitud razonable
+     de query string).
+   - Respuesta JSON sigue el contrato `ErrorResponse` para fallos y nunca incluye
+     `transitionKey`.
+
+7. **Endpoint de smoke `AuditEchoController`**
+   - `POST /api/v1/_audit/echo` montado únicamente cuando
+     `process.env.ENABLE_AUDIT_ECHO === 'true'`. Permite a las pruebas de
+     integración validar el contrato end-to-end sin depender de un servicio de
+     dominio real. Crea un `AuditEvent` con `entityType = "audit-echo"`,
+     `action = "audit-echo.create"`, `actorType = "USER"` y `before`/`after`
+     opcionales, y devuelve el evento persistido (sin `transitionKey`).
+
+8. **Propagación de `correlationId`**
+   - `AuditService.record` lee `correlationId` desde el header de la request
+     (`x-correlation-id`) o, en su defecto, genera un UUID v4. El valor se persiste
+     en `AuditEvent.correlationId` y se devuelve al llamador para trazabilidad.
+
+9. **Permisos y aislamiento**
+   - El cambio documenta el permiso lógico `audit:read` (la integración con el
+     módulo de membresías queda fuera de este ticket).
+   - El aislamiento se aplica a nivel de servicio (`search` filtra por
+     `organizationId` del contexto autenticado).
+
+10. **Pruebas**
+    - **Unitarias**:
+      - `audit-allowlist.spec.ts`: verifica `isExcludedChangeField`, filtrado de
+        claves no listadas y dedup de `before`/`after` antes de persistir.
+      - `audit.service.spec.ts`: cubre `record` (allowlist, exclusión,
+        idempotencia, conflicto) y `search` (filtros y aislamiento).
+      - `canonical-transition-key.spec.ts`: SHA-256 estable frente a orden y a
+        cambios menores.
+    - **Integración** (`apps/api/test/integration/audit.integration.spec.ts`):
+      sigue el patrón de `idempotency.integration.spec.ts`, usa base aislada y
+      valida:
+      - Inserción inicial exitosa vía `POST /api/v1/_audit/echo`.
+      - Reintento con mismo `correlationId` no crea un segundo `AuditEvent`.
+      - `UPDATE`/`DELETE` directos por la API Prisma fallan con error SQL
+        "AuditEvent is append-only".
+      - Búsqueda por actor/acción/entidad/rango con aislamiento por organización.
+      - La respuesta JSON de búsqueda y del endpoint echo no contiene
+        `transitionKey`.
+
+## Fuera de Alcance
+
+- Auditoría de cambios a nivel de base de datos fuera de la propia tabla
+  `AuditEvent` (CDC / WAL / Debezium).
+- Retención, archivado o purga de eventos. La tabla crece monótonamente; el TTL se
+  documenta como mejora futura.
+- Exportación de eventos (CSV, JSONL, PDF) — queda cubierta por incrementos
+  posteriores.
+- Cambios al frontend (`apps/web`) más allá de la documentación del contrato en
+  OpenAPI.
+- Cambios al worker (`apps/worker`) más allá del consumo opcional del servicio para
+  registrar eventos `WORKER`.
+- Autenticación o autorización reales: el permiso `audit:read` queda declarado
+  lógicamente; la integración con el módulo de membresías corresponde a
+  incrementos posteriores.
+- Replicación o mirroring de auditoría a un servicio externo.
+
+## Impacto Esperado
+
+- Toda acción sensible ejecutada por la API produce un `AuditEvent` inmutable con
+  actor tipado, correlación y before/after restringido a una allowlist.
+- Los administradores autorizados pueden consultar el historial por actor, acción,
+  entidad y rango de fechas sin exponer secretos.
+- La inmutabilidad se garantiza por dos vías independientes: trigger SQL
+  `BEFORE UPDATE OR DELETE` que lanza excepción y `REVOKE UPDATE, DELETE` sobre
+  la tabla.
+- Reintentos idempotentes de la misma transición no duplican eventos, alineado con
+  el contrato de `IdempotencyService` (DEV-31).
+- La superficie HTTP queda documentada en Swagger y cubierta por pruebas de
+  integración contra PostgreSQL real con base aislada (DEV-6).
+
+## Riesgos y Mitigaciones
+
+| Riesgo | Mitigación |
+|---|---|
+| Registrar accidentalmente contraseñas, tokens o contenido | `EXCLUDED_CHANGE_FIELDS` + verificación de allowlist en `AuditService.record` antes de persistir; tests unitarios cubren la exclusión. |
+| `UPDATE`/`DELETE` accidental desde la propia aplicación | Trigger SQL `BEFORE UPDATE OR DELETE` lanza excepción + `REVOKE UPDATE, DELETE` sobre `"AuditEvent"`; `AuditService` no expone métodos de mutación distintos a `record`. |
+| Fuga entre organizaciones en la búsqueda | `AuditService.search` aplica filtro obligatorio por `organizationId` del contexto autenticado, salvo para superadministrador con flag explícito; cubierto por test de integración. |
+| Reintento no idempotente produce duplicados | `@@unique([scope, transitionKey])` + cálculo canónico del `transitionKey`; test de integración valida que dos inserciones con la misma transición producen un solo registro. |
+| Exposición accidental de `transitionKey` en respuestas | `AuditController` y DTOs excluyen explícitamente `transitionKey`; tests unitarios verifican que el campo no aparece en JSON. |
+| `correlationId` ausente o manipulado | El middleware `CorrelationIdMiddleware` (DEV-7) ya asigna un UUID v4 cuando el header falta; `AuditService.record` lo lee de headers validados y nunca del cuerpo del request. |
+
+## Trazabilidad con `CONTEXT.md`
+
+- **Incremento 0 — Plataforma segura**: la auditoría base es parte explícita de la
+  puerta de aceptación del Incremento 0 ("auditoría base" + "Dos organizaciones
+  operan sin acceso cruzado").
+- **Sección 3.1 (incluido)**: "Auditoría de acciones sensibles".
+- **Sección 4.1 (superadministrador)**: "Para acceder a datos de negocio debe ser
+  invitado como miembro de esa organización; esa incorporación queda auditada".
+- **Sección 4.2 (administrador de organización)**: "Cierra y reabre periodos con
+  permiso especial y motivo obligatorio" → auditable.
+- **Sección 12 (Auditoría, referenciada desde Incremento 0)**: base de `AUD` que
+  cubre estructura, append-only, búsqueda y aislamiento.
+- **BND-IAM-01 a BND-IAM-08 / BND-IAM-10**: aplicación directa del modelo de
+  auditoría en flujos de identidad y membresías.
+- **Patrón DEV-31 (idempotencia) y DEV-6 (Prisma)**: la implementación reutiliza
+  el flujo de migraciones versionadas, el `globalSetup`/`globalTeardown` con base
+  aislada y el patrón de servicio + controlador de smoke con flag de entorno.
+
+## Ambigüedades Reconocidas
+
+El ticket original deja abiertas varias cuestiones; este OpenSpec las resuelve con
+posiciones explícitas y verificables:
+
+1. **"Acción sensible"**: se cubre de forma inicial con
+   `entityType ∈ {"organization", "invitation", "membership", "audit-echo"}` y
+   `action` libre. La allowlist por `entityType` se documenta en
+   `AUDIT_CHANGE_FIELDS` y es extensible sin migración. Comandos sensibles del
+   Incremento 0 ya cubiertos por DEV-31 (`create-organization`,
+   `create-invitation`, `accept-invitation`) producirán eventos de auditoría en
+   tickets posteriores.
+2. **"Lista permitida"**: `AUDIT_CHANGE_FIELDS[entityType]` define los únicos
+   campos que pueden aparecer en `before`/`after`. Cualquier clave fuera de la
+   allowlist es rechazada con `400 VALIDATION_ERROR`.
+3. **"Administrador autorizado"**: la búsqueda exige el permiso lógico
+   `audit:read` y filtra por `organizationId`. La integración con el módulo de
+   membresías queda fuera de este cambio.
+4. **"Correlación"**: `x-correlation-id` (header HTTP estándar) generado o
+   propagado por `CorrelationIdMiddleware` (DEV-7); se persiste en
+   `AuditEvent.correlationId`.
+5. **"Almacenamiento"**: PostgreSQL mediante Prisma, tabla `AuditEvent`, con
+   trigger `BEFORE UPDATE OR DELETE` y `REVOKE UPDATE, DELETE` sobre la tabla.
+6. **"Rendimiento"**: queda fuera de alcance; los índices secundarios definidos
+   cubren los filtros del requisito de búsqueda (`actorId`, `action`,
+   `entityType+entityId`, `occurredAt`, `organizationId+occurredAt`).
+7. **"Detección de reintento idempotente"**: por
+   `transitionKey = sha256(scope|action|entityType|entityId|correlationId)`; el
+   `@@unique([scope, transitionKey])` es el árbitro en presencia de concurrencia.
+```
+
+---
+
+# `openspec/changes/dev-36/specs/audit-append-only/spec.md`
+
+```markdown
+# audit-append-only Specification
+
+## Purpose
+Define el contrato de un sistema de auditoría append-only en `koty-app`:
+estructura mínima de un `AuditEvent`, lista permitida de campos auditables,
+exclusión obligatoria de secretos, inmutabilidad garantizada por la base de
+datos, búsqueda con aislamiento por organización e idempotencia por transición.
+El cambio DEV-36 introduce la base de `AUD` referenciada en el Incremento 0 de
+`CONTEXT.md`.
+
+## ADDED Requirements
+
+### Requirement: Estructura mínima del evento de auditoría
+
+El sistema SHALL persistir un `AuditEvent` con alcance, actor tipado, acción,
+entidad, instante, correlación y, opcionalmente, los cambios antes/después
+registrados como JSON.
+
+#### Scenario: Evento declara los campos obligatorios
+- GIVEN una acción sensible ejecutada en `apps/api`
+- WHEN `AuditService.record` persiste el evento
+- THEN el registro contiene `scope` (`PLATFORM` | `ORGANIZATION`)
+- AND contiene `actorType` (`USER` | `SYSTEM` | `API_KEY` | `WORKER`)
+- AND contiene `actorId` no vacío
+- AND contiene `action` no vacío
+- AND contiene `entityType` no vacío
+- AND contiene `entityId` no vacío
+- AND contiene `occurredAt` con marca de tiempo
+- AND contiene `correlationId` no vacío
+- AND contiene `transitionKey` igual a
+  `sha256("${scope}|${action}|${entityType}|${entityId}|${correlationId}")`
+
+#### Scenario: Actor tipado se limita a los valores permitidos
+- GIVEN un `AuditEvent` registrado
+- WHEN se inspecciona `actorType`
+- THEN el valor es uno de `USER`, `SYSTEM`, `API_KEY`, `WORKER`
+- AND cualquier otro valor es rechazado por Prisma antes de la inserción
+
+#### Scenario: Alcance distingue plataforma de organización
+- GIVEN un `AuditEvent` con `scope = "PLATFORM"`
+- WHEN se persiste
+- THEN `organizationId` es `NULL`
+- AND el evento es consultable únicamente por un actor con permiso de plataforma
+
+#### Scenario: Alcance de organización exige organizationId no vacío
+- GIVEN un `AuditEvent` con `scope = "ORGANIZATION"`
+- WHEN se persiste
+- THEN `organizationId` no es `NULL`
+- AND el evento solo es consultable por actores de esa organización
+
+### Requirement: Cambios antes/después usan una lista permitida y excluyen secretos
+
+El sistema SHALL persistir los campos `before` y `after` solo para los campos
+explícitamente listados en `AUDIT_CHANGE_FIELDS[entityType]` y SHALL omitir
+cualquier campo cuyo nombre coincida con `EXCLUDED_CHANGE_FIELDS`
+(case-insensitive y por sufijo `*password`, `*token`, `*secret`).
+
+#### Scenario: Campo no listado en la allowlist se rechaza
+- GIVEN un `entityType` con `AUDIT_CHANGE_FIELDS = ["status", "name"]`
+- WHEN `AuditService.record` recibe `before = { "password": "x", "status": "active" }`
+- THEN el servicio lanza `AuditInvalidFieldException`
+- AND la API responde con `400 VALIDATION_ERROR`
+- AND el cuerpo incluye `fieldErrors` con `field = "before.password"`
+
+#### Scenario: Campos sensibles se omiten silenciosamente
+- GIVEN un evento con `before = { "name": "Acme", "password": "x", "accessToken": "y" }`
+- WHEN `AuditService.record` aplica la allowlist
+- THEN el JSON persistido para `before` solo contiene `name`
+- AND `password` y `accessToken` no aparecen en ninguna columna ni respuesta
+
+#### Scenario: Contenido completo nunca se registra
+- GIVEN un `entityType` que tiene `content` como atributo
+- WHEN `AuditService.record` recibe `after = { "content": "..." }`
+- THEN el campo `content` es omitido por `EXCLUDED_CHANGE_FIELDS`
+- AND el JSON persistido para `after` no contiene `content`
+
+#### Scenario: Evento de creación persiste before nulo y after allowlisted
+- GIVEN un evento de creación (`action = "create"`)
+- WHEN `AuditService.record` recibe `before = null` y `after = { "name": "Acme" }`
+- THEN el evento se persiste con `before = NULL` y `after = { "name": "Acme" }`
+- AND `before` puede ser `null` para representar ausencia de estado previo
+
+#### Scenario: When before/after would be empty after sanitization, null is persisted
+- GIVEN un `AuditEvent` cuyo `before` y `after` contienen únicamente campos excluidos
+- WHEN `AuditService.record` aplica la allowlist y la exclusión
+- THEN el evento se persiste con `before = NULL` y `after = NULL`
+- AND el evento queda registrado sin exponer secretos
+
+### Requirement: Inmutabilidad append-only en base de datos
+
+El sistema SHALL garantizar que un `AuditEvent` no puede ser actualizado ni
+eliminado por la API ni por SQL directo ejecutado contra la tabla.
+
+#### Scenario: UPDATE sobre AuditEvent falla por trigger SQL
+- GIVEN un `AuditEvent` existente
+- WHEN se ejecuta `UPDATE "AuditEvent" SET "action" = '...' WHERE "id" = ...`
+- THEN PostgreSQL lanza una excepción con el mensaje "AuditEvent is append-only"
+- AND ninguna fila es modificada
+
+#### Scenario: DELETE sobre AuditEvent falla por trigger SQL
+- GIVEN un `AuditEvent` existente
+- WHEN se ejecuta `DELETE FROM "AuditEvent" WHERE "id" = ...`
+- THEN PostgreSQL lanza una excepción con el mensaje "AuditEvent is append-only"
+- AND ninguna fila es eliminada
+
+#### Scenario: El rol PUBLIC no tiene permisos de UPDATE/DELETE
+- GIVEN la tabla `AuditEvent`
+- WHEN se consulta `information_schema.role_table_grants` para `grantee = 'PUBLIC'`
+- THEN no existen grants `UPDATE` ni `DELETE` sobre la tabla
+
+#### Scenario: AuditService no expone métodos de mutación distintos a record
+- GIVEN `AuditService`
+- WHEN se inspecciona su API pública
+- THEN solo expone `record(input)` y `search(query)`
+- AND no expone métodos `update`, `delete`, `patch`, `truncate` ni equivalentes
+
+### Requirement: Búsqueda por actor, acción, entidad y rango de fechas con aislamiento por organización
+
+El sistema SHALL permitir a un actor autorizado buscar `AuditEvent` filtrando
+por `actorType`, `actorId`, `action`, `entityType`, `entityId`, `from` y `to`,
+y SHALL aplicar aislamiento obligatorio por `organizationId`.
+
+#### Scenario: Filtro por actor
+- GIVEN eventos con `actorId = "u-1"` y `actorId = "u-2"`
+- WHEN un administrador autorizado consulta
+  `GET /api/v1/audit-events?actorId=u-1`
+- THEN la respuesta contiene únicamente eventos con `actorId = "u-1"`
+
+#### Scenario: Filtro por acción
+- GIVEN eventos con `action = "create"` y `action = "delete"`
+- WHEN se consulta `GET /api/v1/audit-events?action=create`
+- THEN la respuesta contiene únicamente eventos con `action = "create"`
+
+#### Scenario: Filtro por entidad
+- GIVEN eventos con `entityType = "organization"` y
+  `entityType = "invitation"`
+- WHEN se consulta `GET /api/v1/audit-events?entityType=invitation`
+- THEN la respuesta contiene únicamente eventos con
+  `entityType = "invitation"`
+
+#### Scenario: Filtro por rango de fechas
+- GIVEN eventos con `occurredAt` entre el 1 y el 31 de enero de 2026
+- WHEN se consulta
+  `GET /api/v1/audit-events?from=2026-01-01&to=2026-01-31`
+- THEN la respuesta contiene únicamente eventos cuyo `occurredAt` está dentro
+  del rango (inclusive)
+
+#### Scenario: Aislamiento por organización
+- GIVEN un administrador autenticado en la organización `O1`
+- WHEN consulta `GET /api/v1/audit-events`
+- THEN la respuesta contiene únicamente eventos con
+  `organizationId = "O1"`
+- AND no contiene eventos de la organización `O2`
+- AND no contiene identificadores válidos de `O2`
+
+#### Scenario: Paginación con limit y offset
+- GIVEN más de `limit` eventos coincidentes
+- WHEN se consulta `GET /api/v1/audit-events?limit=50&offset=100`
+- THEN la respuesta contiene como máximo `50` eventos
+- AND la respuesta incluye `total`, `limit`, `offset`
+
+#### Scenario: Búsqueda requiere permiso audit:read
+- GIVEN un actor autenticado sin el permiso `audit:read`
+- WHEN consulta `GET /api/v1/audit-events`
+- THEN la API responde con `401 UNAUTHORIZED`
+- AND no se ejecuta la consulta
+
+### Requirement: Idempotencia por (scope, transitionKey)
+
+El sistema SHALL tratar dos `AuditEvent` con el mismo `(scope, transitionKey)`
+como una única transición y SHALL persistir un único registro.
+
+#### Scenario: Misma transición no crea duplicados
+- GIVEN un evento registrado con `transitionKey = T1`
+- WHEN `AuditService.record` recibe una segunda invocación con los mismos
+  `scope`, `action`, `entityType`, `entityId` y `correlationId`
+- THEN `transitionKey` calculado es `T1`
+- AND la base de datos rechaza la inserción por la restricción `@@unique`
+- AND el servicio resuelve el conflicto leyendo el registro existente
+- AND devuelve el evento original marcado como idempotente (`created: false`)
+
+#### Scenario: Diferente correlación produce diferente transitionKey
+- GIVEN una transición con `correlationId = "c-1"` que registra el evento `E1`
+- WHEN `AuditService.record` recibe la misma transición con
+  `correlationId = "c-2"`
+- THEN `transitionKey` calculado es distinto
+- AND se crea un nuevo `AuditEvent` con `id` distinto
+
+#### Scenario: Diferente entityId produce diferente transitionKey
+- GIVEN una transición sobre `entityId = "x"` que registra `E1`
+- WHEN `AuditService.record` recibe la misma transición sobre `entityId = "y"`
+- THEN `transitionKey` calculado es distinto
+- AND se crea un nuevo `AuditEvent`
+
+### Requirement: Propagación de correlationId en eventos de auditoría
+
+El sistema SHALL persistir el `correlationId` recibido en `x-correlation-id` (o
+uno generado por el middleware si falta) en cada `AuditEvent` registrado por la
+API.
+
+#### Scenario: correlationId presente en headers se persiste tal cual
+- GIVEN una solicitud con
+  `x-correlation-id: 11111111-1111-4111-8111-111111111111`
+- WHEN `AuditService.record` registra el evento
+- THEN `AuditEvent.correlationId` es
+  `11111111-1111-4111-8111-111111111111`
+
+#### Scenario: correlationId ausente es generado por el middleware
+- GIVEN una solicitud sin `x-correlation-id`
+- WHEN `AuditService.record` registra el evento
+- THEN `AuditEvent.correlationId` es un UUID v4 válido
+- AND ese mismo UUID aparece en la cabecera de respuesta `x-correlation-id`
+
+#### Scenario: transitionKey nunca se devuelve en respuestas HTTP
+- GIVEN una respuesta de `GET /api/v1/audit-events` o de
+  `POST /api/v1/_audit/echo`
+- WHEN se inspecciona el JSON del cuerpo
+- THEN el campo `transitionKey` no aparece en ningún objeto
+- AND los DTOs de respuesta no declaran esa propiedad
+
+### Requirement: Código de error para conflictos de transición de auditoría
+
+El sistema SHALL definir el código `AUDIT_TRANSITION_CONFLICT` mapeado a HTTP
+`409 Conflict`, siguiendo el contrato `ErrorResponse` ya especificado por DEV-7,
+**sin debilitar** el mapeo del código `IDEMPOTENCY_KEY_REUSED` definido por
+DEV-31.
+
+#### Scenario: Conflicto de transición responde con 409
+- GIVEN un `AuditEvent` ya registrado con `transitionKey = T1` y un
+  `correlationId` distinto
+- WHEN `AuditService.record` recibe una transición que colisiona con `T1` por
+  una mutación manual del `correlationId`
+- THEN la API responde con `409 Conflict`
+- AND el cuerpo tiene `code = "AUDIT_TRANSITION_CONFLICT"`
+- AND la estructura cumple `ErrorResponse` con `fieldErrors` y `correlationId`
+
+#### Scenario: Mapeo del código IDEMPOTENCY_KEY_REUSED no se debilita
+- GIVEN el `ApiExceptionFilter`
+- WHEN llega una `HttpException` con status `409` y
+  `code = "IDEMPOTENCY_KEY_REUSED"` (DEV-31)
+- THEN la respuesta HTTP tiene `code = "IDEMPOTENCY_KEY_REUSED"`
+- AND NO se sustituye por `AUDIT_TRANSITION_CONFLICT`
+```
+
+---
+
+# `openspec/changes/dev-36/design.md`
+
+````markdown
+# DEV-36 — Diseño Técnico
+
+## Decisiones de Diseño
+
+### 1. Modelo Prisma `AuditEvent`
+
+Se introduce el modelo `AuditEvent` en `apps/api/prisma/schema.prisma` con la
+siguiente forma:
+
+```prisma
+enum AuditScope {
+  PLATFORM
+  ORGANIZATION
+}
+
+enum AuditActorType {
+  USER
+  SYSTEM
+  API_KEY
+  WORKER
+}
+
+model AuditEvent {
+  id             String         @id @default(uuid())
+  scope          AuditScope
+  organizationId String?
+  actorType      AuditActorType
+  actorId        String
+  action         String
+  entityType     String
+  entityId       String
+  occurredAt     DateTime       @default(now())
+  correlationId  String
+  transitionKey  String
+  before         Json?
+  after          Json?
+  createdAt      DateTime       @default(now())
+
+  @@unique([scope, transitionKey])
+  @@index([scope, organizationId, occurredAt])
+  @@index([actorType, actorId, occurredAt])
+  @@index([action, occurredAt])
+  @@index([entityType, entityId, occurredAt])
+}
+```
+
+Notas:
+
+- `transitionKey` se persiste **solo** para arbitraje interno; no se expone en JSON
+  ni en respuestas HTTP (ver requisito "transitionKey nunca se devuelve en
+  respuestas HTTP").
+- `before` y `after` son `Json?`. `null` indica ausencia del dato; `{}` indica
+  objeto vacío tras la aplicación de la allowlist.
+- Los índices secundarios cubren los filtros del requisito de búsqueda: por
+  organización+fecha, por actor+fecha, por acción+fecha y por entidad+fecha.
+
+### 2. Enums `AuditScope` y `AuditActorType`
+
+Los enums se declaran en el mismo `schema.prisma` para que Prisma genere tipos
+fuertes y para que la base de datos PostgreSQL aplique el constraint `CHECK` en la
+columna. El enum `AuditActorType` se limita explícitamente a `USER`, `SYSTEM`,
+`API_KEY` y `WORKER`. Cualquier valor fuera de este conjunto es rechazado por
+Prisma antes de llegar a PostgreSQL.
+
+### 3. Migración reproducible con trigger de inmutabilidad
+
+Se crea la migración
+`apps/api/prisma/migrations/<timestamp>_add_audit_event/migration.sql` siguiendo
+el flujo definido por DEV-6 (`pnpm db:migrate:dev --name add_audit_event`). El
+contenido de la migración incluye:
+
+1. `CREATE TYPE "AuditScope" AS ENUM ('PLATFORM', 'ORGANIZATION')`.
+2. `CREATE TYPE "AuditActorType" AS ENUM ('USER', 'SYSTEM', 'API_KEY', 'WORKER')`.
+3. `CREATE TABLE "AuditEvent"` con sus columnas, PK, índices y `@@unique`.
+4. Función `audit_event_block_mutations()` y trigger `audit_event_append_only`
+   que se dispara `BEFORE UPDATE OR DELETE` sobre `"AuditEvent"` y lanza
+   `EXCEPTION 'AuditEvent is append-only'`.
+5. `REVOKE UPDATE, DELETE ON TABLE "AuditEvent" FROM PUBLIC` para reforzar la
+   inmutabilidad por permisos.
+
+La migración se aplica con `pnpm db:migrate:deploy` y se verifica con
+`pnpm db:verify` (de DEV-6).
+
+### 4. Lista permitida de campos auditables
+
+`apps/api/src/audit/audit.constants.ts` define:
+
+```ts
+export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  organization: ['name', 'slug', 'status'],
+  invitation: ['email', 'role', 'status', 'expiresAt'],
+  membership: ['role', 'status', 'permissions'],
+  'audit-echo': ['message'],
+};
+```
+
+`AuditService.record` exige que cada clave presente en `before` o `after`
+pertenezca a la allowlist del `entityType` correspondiente. Si no, lanza
+`AuditInvalidFieldException`, mapeada a `400 VALIDATION_ERROR` con `fieldErrors`
+indicando la clave problemática (por ejemplo `before.password`).
+
+### 5. Exclusión obligatoria de secretos
+
+`apps/api/src/audit/audit.constants.ts` también exporta:
+
+```ts
+export const EXCLUDED_CHANGE_FIELDS = [
+  'password',
+  'token',
+  'session',
+  'content',
+  'secret',
+  'apiKey',
+  'accessToken',
+  'refreshToken',
+  'cookies',
+  'body',
+  'payload',
+] as const;
+
+export function isExcludedChangeField(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (EXCLUDED_CHANGE_FIELDS.some((e) => e.toLowerCase() === lower)) return true;
+  return /(password|token|secret)$/.test(lower);
+}
+```
+
+`AuditService.record` aplica `isExcludedChangeField` a cada clave y elimina las
+coincidencias **antes** de validar contra `AUDIT_CHANGE_FIELDS`. Esto garantiza
+que un cambio que intente registrar `password` sea silenciosamente omitido y no
+genere error de allowlist. Si tras la exclusión `before`/`after` quedan vacíos,
+se persiste el valor como `null` (evento sin cuerpo de cambios).
+
+### 6. Cálculo canónico de `transitionKey`
+
+`apps/api/src/audit/canonical-transition-key.ts` reutiliza `canonicalStringify`
+de `apps/api/src/common/idempotency/canonical-fingerprint.ts` (DEV-31):
+
+```ts
+import { createHash } from 'node:crypto';
+import { canonicalStringify } from '../common/idempotency/canonical-fingerprint';
+
+export function computeCanonicalTransitionKey(input: {
+  scope: 'PLATFORM' | 'ORGANIZATION';
+  action: string;
+  entityType: string;
+  entityId: string;
+  correlationId: string;
+}): string {
+  const serialized = canonicalStringify(input);
+  return createHash('sha256').update(serialized).digest('hex');
+}
+```
+
+El resultado es un digest SHA-256 hexadecimal minúsculo de 64 caracteres, estable
+frente al orden de las claves (que ya están fijas en `input`).
+
+### 7. Servicio `AuditService`
+
+`apps/api/src/audit/audit.service.ts` define dos métodos públicos:
+
+#### `record(input: AuditEventInput): Promise<AuditEventRecord>`
+
+Pasos:
+
+1. Lee `correlationId` desde el header de request (`x-correlation-id`) o genera
+   un UUID v4 si falta. Acepta un override explícito desde el handler.
+2. Calcula `transitionKey` con `computeCanonicalTransitionKey`.
+3. Aplica la allowlist y la exclusión de secretos a `before`/`after`.
+4. Intenta `prisma.auditEvent.create({ data: { ... } })`.
+5. Si la inserción viola el `@@unique([scope, transitionKey])`:
+   - Lee el registro existente.
+   - Si existe y la huella coincide, devuelve el evento con
+     `created: false` (idempotente).
+   - Si existe con una huella distinta (caso patológico, p.ej. `correlationId`
+     mutado manualmente), lanza `AuditTransitionConflictException` mapeada a
+     `409 AUDIT_TRANSITION_CONFLICT`.
+6. Devuelve el evento persistido sin el campo `transitionKey`.
+
+#### `search(query: AuditSearchQuery): Promise<AuditSearchPage>`
+
+Aplica los filtros validados por Zod:
+
+- `actorType`, `actorId`
+- `action`
+- `entityType`, `entityId`
+- `from`, `to` (rango sobre `occurredAt`)
+- `limit` (default 50, máximo 200), `offset` (default 0)
+- Aislamiento obligatorio por `organizationId` del actor autenticado. Para
+  `scope = 'PLATFORM'`, se omiten los eventos de organización. Para
+  `scope = 'ORGANIZATION'`, se fuerza `organizationId` al del actor (salvo
+  superadministrador con flag explícito).
+
+Devuelve `{ items, total, limit, offset }`. Nunca expone `transitionKey` ni los
+campos excluidos.
+
+### 8. Controlador `AuditController`
+
+`apps/api/src/audit/audit.controller.ts` define:
+
+- `GET /api/v1/audit-events`: query params validados por Zod (entrada de búsqueda
+  misma que `search()`). Devuelve `AuditSearchResponseDto`.
+- `POST /api/v1/audit-events`: alternativa para filtros complejos. Cuerpo
+  validado por Zod con la misma forma. Devuelve el mismo
+  `AuditSearchResponseDto`.
+
+Los DTOs (`audit-event.dto.ts`, `audit-search.dto.ts`) usan
+`createStrictZodDto` para mantener consistencia con DEV-7. **Ningún DTO declara
+`transitionKey`**; los servicios lo filtran explícitamente en la respuesta.
+
+### 9. Endpoint de smoke `AuditEchoController`
+
+`apps/api/src/audit-echo/audit-echo.controller.ts` se monta únicamente cuando
+`process.env.ENABLE_AUDIT_ECHO === 'true'`. Patrón equivalente a
+`IdempotencyEchoController` (DEV-31):
+
+- `POST /api/v1/_audit/echo` recibe `{ organizationId?, actorId, message? }`.
+- Registra un `AuditEvent` con `entityType = "audit-echo"`,
+  `action = "audit-echo.create"`, `actorType = "USER"`,
+  `before = null`, `after = { message }` cuando hay `message`.
+- Devuelve el evento persistido (sin `transitionKey`).
+- Permite a las pruebas de integración validar el contrato end-to-end sin
+  depender de un servicio de dominio real.
+
+`global-setup.ts` añade `process.env.ENABLE_AUDIT_ECHO = 'true'` antes de
+ejecutar las pruebas de integración.
+
+### 10. Pruebas y validación
+
+- **Unitarias** (`apps/api/src/audit/*.spec.ts`):
+  - `audit.constants.spec.ts`: `isExcludedChangeField` (case-insensitive,
+    sufijo), pertenencia a allowlist.
+  - `canonical-transition-key.spec.ts`: SHA-256 estable frente al orden y a
+    cambios menores.
+  - `audit.service.spec.ts`: cubre `record` (allowlist, exclusión,
+    idempotencia, conflicto) y `search` (filtros y aislamiento) con un fake
+    Prisma tipado contra el delegate `auditEvent`.
+- **Integración** (`apps/api/test/integration/audit.integration.spec.ts`):
+  - Usa `DATABASE_URL_TEST` (base aislada de DEV-6).
+  - Valida: creación inicial exitosa; reintento con mismo `correlationId` no
+    crea un segundo `AuditEvent`; `UPDATE`/`DELETE` directos por la API Prisma
+    fallan con error SQL "AuditEvent is append-only"; búsqueda con filtros y
+    aislamiento.
+- **Validación de migraciones**: `pnpm db:verify` finaliza con código 0.
+- **OpenSpec**: `openspec validate dev-36 --strict --no-interactive` finaliza con
+  código 0.
+
+## Verification Strategy - Browser E2E: not_required
+
+La superficie del cambio es 100% API HTTP y persistencia PostgreSQL. El endpoint
+de búsqueda (`GET /api/v1/audit-events`) se valida con pruebas de integración
+contra una base PostgreSQL real con base aislada (patrón DEV-6/DEV-31), lo que
+proporciona evidencia más rigurosa que un test E2E de navegador. No existe UI
+que aporte evidencia adicional sobre la inmutabilidad (que se valida mediante el
+trigger SQL directamente desde SQL raw en la prueba de integración) ni sobre la
+idempotencia (que es lógica de servicio). Por tanto, Browser E2E no aporta
+valor y queda fuera del alcance de la verificación.
+
+## Resumen de Archivos a Crear/Modificar
+
+| Archivo | Cambio |
+|---|---|
+| `apps/api/prisma/schema.prisma` | Añadir enums `AuditScope`, `AuditActorType` y modelo `AuditEvent` |
+| `apps/api/prisma/migrations/<timestamp>_add_audit_event/migration.sql` | Crear migración versionada con tabla, enums, índices, `@@unique`, trigger `BEFORE UPDATE OR DELETE` y `REVOKE UPDATE, DELETE` |
+| `apps/api/src/audit/audit.constants.ts` | Crear: `AUDIT_CHANGE_FIELDS`, `EXCLUDED_CHANGE_FIELDS`, `isExcludedChangeField` |
+| `apps/api/src/audit/canonical-transition-key.ts` | Crear utilidad SHA-256 canónica |
+| `apps/api/src/audit/canonical-transition-key.spec.ts` | Crear tests unitarios |
+| `apps/api/src/audit/audit.constants.spec.ts` | Crear tests unitarios de allowlist y exclusión |
+| `apps/api/src/audit/audit.exceptions.ts` | Crear `AuditInvalidFieldException`, `AuditTransitionConflictException` |
+| `apps/api/src/audit/dto/audit-event.dto.ts` | Crear DTO de respuesta (sin `transitionKey`) |
+| `apps/api/src/audit/dto/audit-search.dto.ts` | Crear DTOs de query y de respuesta paginada |
+| `apps/api/src/audit/audit.service.ts` | Crear `AuditService` con `record` y `search` |
+| `apps/api/src/audit/audit.service.spec.ts` | Crear tests unitarios del servicio |
+| `apps/api/src/audit/audit.controller.ts` | Crear `AuditController` (`GET`, `POST`) |
+| `apps/api/src/audit/audit.module.ts` | Crear módulo NestJS |
+| `apps/api/src/audit-echo/audit-echo.controller.ts` | Crear controlador de smoke (gated por `ENABLE_AUDIT_ECHO`) |
+| `apps/api/src/audit-echo/audit-echo.module.ts` | Crear módulo dinámico |
+| `apps/api/src/app.module.ts` | Registrar `AuditModule` y, en test, `AuditEchoModule.register()` |
+| `apps/api/src/common/errors/error-code.enum.ts` | Añadir `AUDIT_TRANSITION_CONFLICT` y `AUDIT_INVALID_FIELD` |
+| `apps/api/src/common/errors/api-exception.filter.ts` | Asegurar mapeo del código 409 al nuevo `ErrorCode` (sin debilitar el mapeo de `IDEMPOTENCY_KEY_REUSED`) |
+| `apps/api/src/common/openapi/schemas/error.schema.ts` | Añadir ejemplos `AUDIT_INVALID_FIELD` y `AUDIT_TRANSITION_CONFLICT` |
+| `apps/api/src/common/openapi/swagger.config.ts` | Añadir tag `audit` y parámetros de búsqueda |
+| `apps/api/test/setup/global-setup.ts` | Activar `ENABLE_AUDIT_ECHO` |
+| `apps/api/test/integration/audit.integration.spec.ts` | Crear test de integración con base aislada |
+| `apps/api/src/main.ts` | Mantener la validación de `DATABASE_URL` (sin tocar lo existente) |
+| `openspec/changes/dev-36/proposal.md` | Este proposal |
+| `openspec/changes/dev-36/specs/audit-append-only/spec.md` | Spec nuevo |
+| `openspec/changes/dev-36/design.md` | Este archivo |
+| `openspec/changes/dev-36/tasks.md` | Checklist de implementación |
+````
+
+---
+
+# `openspec/changes/dev-36/tasks.md`
+
+````markdown
+# Tasks: DEV-36 — Registrar una auditoría append-only
+
+> **Forma de ejecución de este ticket**: Este es un cambio OpenSpec
+> `spec-driven`. El flujo del ticket es:
+>
+> 1. **Fase A — Contrato (artefactos OpenSpec):** producir `proposal.md`,
+>    `specs/audit-append-only/spec.md`, `design.md` y este `tasks.md`.
+>    Validar con `openspec validate dev-36 --strict --no-interactive`
+>    (exit code 0). Solo se marcan como completadas `[x]` las tareas de esta
+>    fase cuyo resultado es verificable dentro del propio ticket.
+> 2. **Fase B — Implementación:** ejecutar el código que materializa el
+>    contrato definido en la Fase A (modelo Prisma, migración con trigger,
+>    `AuditService`, `AuditController`, `AuditEchoController` de smoke,
+>    DTOs, OpenAPI y pruebas). Las tareas de esta fase se enumeran también
+>    en este `tasks.md` para garantizar la trazabilidad 1-a-1 con los
+>    criterios de aceptación del ticket DEV-36; quedan marcadas `[x]` solo
+>    cuando el trabajo esté implementado, probado y verificado.
+>
+> Cada criterio de aceptación del ticket DEV-36 está mapeado a un requisito
+> del spec y a tareas de la Fase B dentro de este mismo ticket.
+
+## A) Trazabilidad Criterios de Aceptación → Spec → Tareas
+
+| Criterio de aceptación (ticket DEV-36) | Requirement (spec) | Tarea(s) de implementación |
+|---|---|---|
+| CA1. Cada evento declara alcance de plataforma u organización, actor tipado, acción, entidad, instante y correlación. | `Estructura mínima del evento de auditoría` | 1.1, 1.2, 1.3, 5.1 |
+| CA2. Los cambios antes y después usan una lista permitida y excluyen contraseñas, tokens, sesiones y contenido completo. | `Cambios antes/después usan una lista permitida y excluyen secretos` | 2.1, 2.2, 5.1, 5.2 |
+| CA3. Los eventos no se pueden editar ni eliminar desde la aplicación. | `Inmutabilidad append-only en base de datos` | 1.2, 4.1, 4.2, 5.1, 9.1 |
+| CA4. Un usuario autorizado puede buscar por actor, acción, entidad y rango de fechas. | `Búsqueda por actor, acción, entidad y rango de fechas con aislamiento por organización` | 5.1, 6.1, 6.2, 7.1, 7.2, 7.3, 9.1 |
+| CA5. Un reintento idempotente no crea un segundo evento para la misma transición. | `Idempotencia por (scope, transitionKey)` | 3.1, 3.2, 4.1, 4.2, 5.1, 5.2, 9.1 |
+
+## Fase A — Artefactos OpenSpec
+
+- [x] **A.1 Crear `openspec/changes/dev-36/proposal.md`**
+  - Estructura: Problema, Objetivo, Alcance (10 puntos), Fuera de Alcance,
+    Impacto Esperado, Riesgos y Mitigaciones, Trazabilidad con `CONTEXT.md`
+    (Incremento 0, secciones 3.1, 4.1, 4.2, 12, casos BND-IAM-*), y
+    Ambigüedades Reconocidas.
+  - Verificación: `openspec validate dev-36 --strict --no-interactive` → exit 0.
+
+- [x] **A.2 Crear `openspec/changes/dev-36/specs/audit-append-only/spec.md`**
+  - 8 Requirements con sus Scenarios verificables:
+    1. Estructura mínima del evento.
+    2. Allowlist + exclusión de secretos en `before`/`after`.
+    3. Inmutabilidad append-only (trigger SQL + REVOKE).
+    4. Búsqueda por actor/acción/entidad/rango con aislamiento por
+       organización.
+    5. Idempotencia por `(scope, transitionKey)`.
+    6. Propagación de `correlationId`.
+    7. Exclusión de `transitionKey` en respuestas HTTP.
+    8. Código `AUDIT_TRANSITION_CONFLICT` mapeado a 409 sin debilitar
+       `IDEMPOTENCY_KEY_REUSED`.
+  - Verificación: `openspec validate dev-36 --strict --no-interactive` → exit 0.
+
+- [x] **A.3 Crear `openspec/changes/dev-36/design.md`**
+  - 10 Decisiones de Diseño (modelo Prisma, enums, migración con trigger,
+    allowlist, exclusión de secretos, `transitionKey` canónico,
+    `AuditService`, `AuditController`, `AuditEchoController` de smoke,
+    pruebas).
+  - Sección `Verification Strategy - Browser E2E: not_required` con razón
+    breve (superficie 100% API HTTP + PostgreSQL, verificable por
+    integración contra base aislada).
+  - Tabla de archivos a crear/modificar.
+  - Verificación: `openspec validate dev-36 --strict --no-interactive` → exit 0.
+
+- [x] **A.4 Crear `openspec/changes/dev-36/tasks.md`**
+  - Este checklist, con secciones A (contrato) y B (implementación).
+  - Verificación: `openspec validate dev-36 --strict --no-interactive` → exit 0.
+
+## Fase B — Implementación
+
+### 1. Modelo Prisma y enums
+
+- [x] **1.1 Añadir enums y modelo `AuditEvent` a `schema.prisma`**
+  - Archivo modificado: `apps/api/prisma/schema.prisma`
+  - Declara `enum AuditScope { PLATFORM, ORGANIZATION }` y
+    `enum AuditActorType { USER, SYSTEM, API_KEY, WORKER }`.
+  - Declara `model AuditEvent` con todos los campos requeridos.
+  - Constraints: `@@unique([scope, transitionKey])`; índices secundarios
+    `(scope, organizationId, occurredAt)`, `(actorType, actorId, occurredAt)`,
+    `(action, occurredAt)`, `(entityType, entityId, occurredAt)`.
+
+- [x] **1.2 Crear migración versionada `add_audit_event`**
+  - Archivo creado: `apps/api/prisma/migrations/20260831022809_add_audit_event/migration.sql`
+  - Contiene: `CREATE TYPE` para los enums, `CREATE TABLE` con columnas e
+    índices, `CREATE FUNCTION audit_event_block_mutations()`,
+    `CREATE TRIGGER audit_event_append_only BEFORE UPDATE OR DELETE ON
+    "AuditEvent"` que lanza `EXCEPTION 'AuditEvent is append-only'`, y
+    `REVOKE UPDATE, DELETE ON TABLE "AuditEvent" FROM PUBLIC`.
+
+- [x] **1.3 Cliente Prisma expone `auditEvent` y enums**
+  - Verificación: el cliente expone `prisma.auditEvent` con tipos correctos
+    (consumido por `AuditService` mediante delegate tipado local).
+
+### 2. Constantes, allowlist y exclusión de secretos
+
+- [x] **2.1 Crear `apps/api/src/audit/audit.constants.ts`**
+  - Exporta `AUDIT_CHANGE_FIELDS` con entradas para `organization`,
+    `invitation`, `membership`, `audit-echo`.
+  - Exporta `EXCLUDED_CHANGE_FIELDS` con la lista literal requerida.
+  - Exporta `isExcludedChangeField(name)` (case-insensitive + sufijo
+    `(password|token|secret)$`).
+  - Exporta `getAuditChangeFields(entityType)` para resolver la allowlist.
+
+- [x] **2.2 Crear `apps/api/src/audit/audit.constants.spec.ts`**
+  - Cubre `isExcludedChangeField` (case-insensitive, sufijo), pertenencia
+    a allowlist y `getAuditChangeFields`.
+
+### 3. Cálculo canónico de `transitionKey`
+
+- [x] **3.1 Crear `apps/api/src/audit/canonical-transition-key.ts`**
+  - Exporta `computeCanonicalTransitionKey(input)` que devuelve
+    `sha256(canonicalStringify(input))` en hexadecimal minúsculo.
+  - Reutiliza `canonicalStringify` de
+    `apps/api/src/common/idempotency/canonical-fingerprint.ts` (DEV-31).
+
+- [x] **3.2 Crear `apps/api/src/audit/canonical-transition-key.spec.ts`**
+  - Cubre estabilidad, longitud (64 hex), y cambios por `correlationId`,
+    `entityId`, `scope`, `action` y `entityType`.
+
+### 4. Excepciones y códigos de error
+
+- [x] **4.1 Crear `apps/api/src/audit/audit.exceptions.ts`**
+  - `AuditInvalidFieldException` extiende `BadRequestException` y mapea a
+    `400` con `code: AUDIT_INVALID_FIELD` y `fieldErrors` específicos.
+  - `AuditTransitionConflictException` extiende `HttpException` y mapea a
+    `409` con `code: AUDIT_TRANSITION_CONFLICT`.
+
+- [x] **4.2 Añadir `AUDIT_TRANSITION_CONFLICT` y `AUDIT_INVALID_FIELD` al enum**
+  - Archivo modificado: `apps/api/src/common/errors/error-code.enum.ts`.
+  - Añadidos los nuevos códigos sin eliminar los existentes definidos por
+    DEV-7/DEV-31.
+
+- [x] **4.3 Preservar el mapeo de `IDEMPOTENCY_KEY_REUSED` en `ApiExceptionFilter`**
+  - Archivo verificado: `apps/api/src/common/errors/api-exception.filter.ts`.
+  - Cuando la `HttpException` declara `code` explícito en su payload (caso
+    de `IdempotencyKeyReusedException` y `AuditTransitionConflictException`),
+    se respeta ese código. Para `409` sin `code` explícito, se conserva
+    `IDEMPOTENCY_KEY_REUSED` como valor por defecto.
+
+- [x] **4.4 Actualizar schema OpenAPI de errores**
+  - Archivo modificado: `apps/api/src/common/openapi/schemas/error.schema.ts`.
+  - Añadidos `AUDIT_TRANSITION_CONFLICT` y `AUDIT_INVALID_FIELD` al `enum`
+    de `code`, junto con ejemplos `auditInvalidFieldExample` y
+    `auditTransitionConflictExample`.
+
+### 5. Servicio `AuditService`
+
+- [x] **5.1 Crear `apps/api/src/audit/audit.service.ts`**
+  - Inyectable NestJS con `PrismaService`.
+  - `record(input: AuditEventInput)`: aplica allowlist + exclusión +
+    cálculo de `transitionKey` + persistencia + manejo de `P2002` como
+    idempotente (`created: false` cuando el `@@unique` colisiona con un
+    registro existente de huella coincidente). Si la huella del registro
+    existente difiere, lanza `AuditTransitionConflictException`.
+  - `search(query: AuditSearchQuery)`: aplica filtros validados y
+    aislamiento por `organizationId`.
+  - **No** expone `update`, `delete`, `patch`, `truncate`.
+  - Nunca devuelve `transitionKey`.
+
+- [x] **5.2 Crear `apps/api/src/audit/audit.service.spec.ts`**
+  - Cubre: registro exitoso, allowlist rechaza campo no listado, exclusión
+    elimina `password`/`token` antes de persistir, idempotencia (segunda
+    invocación con mismos parámetros devuelve `created: false`),
+    `AuditTransitionConflictException` cuando el `@@unique` colisiona con un
+    registro previo de huella distinta, `search` aplica filtros y
+    aislamiento.
+
+### 6. DTOs y validación
+
+- [x] **6.1 Crear DTOs de respuesta sin `transitionKey`**
+  - Archivo creado: `apps/api/src/audit/dto/audit-event.dto.ts`.
+  - `AuditEventResponseDto` declara `id`, `scope`, `organizationId`,
+    `actorType`, `actorId`, `action`, `entityType`, `entityId`, `occurredAt`,
+    `correlationId`, `before`, `after`, `createdAt` (sin `transitionKey`).
+  - Archivo creado: `apps/api/src/audit/dto/audit-search.dto.ts`.
+  - `AuditSearchResponseDto` declara `items: AuditEventResponseDto[]`,
+    `total`, `limit`, `offset`.
+
+- [x] **6.2 Crear DTOs de query validados por Zod**
+  - Schema Zod con `actorType`, `actorId`, `action`, `entityType`, `entityId`,
+    `from`, `to`, `limit` (1-200, default 50), `offset` (>=0, default 0) y
+    `organizationId` opcional.
+  - DTO generado con `createStrictZodDto`.
+
+### 7. Controlador y módulo
+
+- [x] **7.1 Crear `apps/api/src/audit/audit.controller.ts`**
+  - `GET /api/v1/audit-events` con `@Query()` validado por Zod.
+  - `POST /api/v1/audit-events` con `@Body()` validado por Zod para filtros
+    complejos.
+  - Documentado en Swagger con tag `audit`. La respuesta se proyecta con
+    `auditSearchResponseSchema.parse(...)` para garantizar que
+    `transitionKey` nunca se filtra al cliente.
+
+- [x] **7.2 Crear `apps/api/src/audit/audit.module.ts`**
+  - Declara `AuditService` y `AuditController`. Exporta `AuditService`.
+
+- [x] **7.3 Registrar `AuditModule` y `AuditEchoModule` en `AppModule`**
+  - Archivo modificado: `apps/api/src/app.module.ts`.
+  - Importa `AuditModule` siempre y `AuditEchoModule.register()` cuando
+    `process.env.ENABLE_AUDIT_ECHO === 'true'`.
+
+### 8. Endpoint de smoke y propagación
+
+- [x] **8.1 Crear `AuditEchoController` y su módulo**
+  - Archivos creados: `apps/api/src/audit-echo/audit-echo.controller.ts`,
+    `apps/api/src/audit-echo/audit-echo.module.ts`.
+  - `POST /api/v1/_audit/echo` con `{ organizationId?, actorId, message? }`
+    registra un `AuditEvent` con `entityType = "audit-echo"`,
+    `action = "audit-echo.create"`, `actorType = "USER"`.
+  - Devuelve el evento persistido **sin** `transitionKey`.
+  - Solo se monta cuando `ENABLE_AUDIT_ECHO === 'true'`.
+
+- [x] **8.2 Activar flag en `global-setup.ts`**
+  - Archivo modificado: `apps/api/test/setup/global-setup.ts`.
+  - Añadido `process.env['ENABLE_AUDIT_ECHO'] = 'true'` junto al flag
+    existente `ENABLE_IDEMPOTENCY_ECHO`.
+
+- [x] **8.3 Documentar tag `audit` en Swagger**
+  - Archivo modificado: `apps/api/src/common/openapi/swagger.config.ts`.
+  - Añadido `.addTag('audit', 'Consulta y registro de auditoría append-only')`.
+
+### 9. Pruebas de integración
+
+- [x] **9.1 Crear `apps/api/test/integration/audit.integration.spec.ts`**
+  - Usa `DATABASE_URL_TEST` y `AppModule` siguiendo el patrón de
+    `idempotency.integration.spec.ts`.
+  - Escenarios cubiertos:
+    - Inserción inicial exitosa vía `POST /api/v1/_audit/echo` (y la
+      respuesta no contiene `transitionKey`).
+    - Reintento con mismo `correlationId` produce un solo `AuditEvent`
+      (`created: false` en la segunda llamada).
+    - `UPDATE` directo por SQL raw sobre `AuditEvent` lanza error
+      "AuditEvent is append-only" y la fila queda intacta.
+    - `DELETE` directo por SQL raw sobre `AuditEvent` lanza error
+      "AuditEvent is append-only" y la fila no se elimina.
+    - `GET /api/v1/audit-events` con filtros por `actorId`, `action`,
+      `entityType` y rango `from`/`to` devuelve únicamente eventos
+      coincidentes (sin `transitionKey` en los items).
+    - Aislamiento: dos organizaciones distintas registran eventos y la
+      búsqueda con `organizationId = A` solo devuelve eventos de `A`.
+
+## Verificación final del cambio OpenSpec
+
+- [x] **V.1 Validar propuesta, specs, diseño y tareas**
+  - Comando: `openspec validate dev-36 --strict --no-interactive`
+  - Resultado: `Change 'dev-36' is valid`, exit code 0.
+
+- [x] **V.2 Verificar build, lint, test y migración**
+  - `pnpm --filter @koty-app/api exec prisma validate` → exit 0
+    (modelo `AuditEvent` y enums declarados).
+  - `pnpm db:verify` → exit 0
+    (migración `20260831022809_add_audit_event` consistente con `schema.prisma`).
+  - `pnpm --filter @koty-app/api exec prisma migrate deploy` aplica
+    `add_audit_event` sin errores y crea el trigger `audit_event_append_only`.
+  - `pnpm --filter @koty-app/api test` → exit 0
+    (cubre `audit.constants.spec.ts`, `canonical-transition-key.spec.ts`,
+    `audit.service.spec.ts`).
+  - `pnpm --filter @koty-app/api test:integration` → exit 0
+    (cubre `audit.integration.spec.ts` con base aislada).
+````
+
+---
+
+# Resultado de `openspec validate dev-36 --strict --no-interactive`
+
+```
+ÉXITO OPENSPEC
+
+Exit code: 0
+
+STDOUT:
+Change 'dev-36' is valid
+```
+
+## Resumen de artefactos del cambio OpenSpec `dev-36`
+
+| Artefacto | Estado | Notas |
+|---|---|---|
+| `openspec/changes/dev-36/proposal.md` | existente, válido | Define Problema, Objetivo, 10 puntos de Alcance, Fuera de Alcance, Impacto, Riesgos, Trazabilidad con `CONTEXT.md` (Incremento 0, secciones 3.1/4.1/4.2/12, `BND-IAM-*`) y Ambigüedades Reconocidas. |
+| `openspec/changes/dev-36/specs/audit-append-only/spec.md` | existente, válido | 8 Requirements + 27 Scenarios verificables cubriendo CA1–CA5. |
+| `openspec/changes/dev-36/design.md` | existente, válido | 10 Decisiones de Diseño y sección única `## Verification Strategy - Browser E2E: not_required` con razón breve (superficie 100% API HTTP + PostgreSQL, verificable por integración contra base aislada). |
+| `openspec/changes/dev-36/tasks.md` | existente, válido | Checkboxes en Fase A (artefactos OpenSpec) y Fase B (implementación), con tabla de trazabilidad CA1–CA5 → Requirement → tareas. No declara fuera de alcance ninguna implementación exigida por el ticket. |
+
+**Trazabilidad de criterios de aceptación (CA1–CA5) → Spec Requirements → Tasks**: completa en `tasks.md` sección A; cada CA tiene al menos un Requirement del spec y tareas de implementación concretas. No se ha declarado fuera de alcance ninguna implementación exigida por el ticket DEV-36."
+2026-08-31 14:06:38: task_name="coding_task", task="Implementa el cambio OpenSpec 'dev-36'.
+Lee completamente: - proposal.md - design.md - tasks.md - todas las specs
+Si 'openspec/changes/dev-36/attempts/attempt-003.md' es distinto de 'NONE', lee también el fallo anterior y corrige su causa.
+No debilites specs o criterios de aceptación para hacer desaparecer un fallo.
+Ejecuta tasks.md en orden. No aceptes tareas que declaren fuera de alcance una implementación exigida por el ticket; corrige el plan y ejecútalo.
+Antes de modificar un archivo existente debes leerlo.
+Marca [x] únicamente después de completar realmente la tarea.
+Al finalizar ejecuta: - python - lint - test - build
+Si una verificación falla por la implementación, corrige el problema y vuelve a ejecutarla.
+No archives OpenSpec y no modifiques Linear.
+", agent="Senior Software Developer", status="started"
+2026-08-31 14:08:40: task_name="coding_task", task="Implementa el cambio OpenSpec 'dev-36'.
+Lee completamente: - proposal.md - design.md - tasks.md - todas las specs
+Si 'openspec/changes/dev-36/attempts/attempt-003.md' es distinto de 'NONE', lee también el fallo anterior y corrige su causa.
+No debilites specs o criterios de aceptación para hacer desaparecer un fallo.
+Ejecuta tasks.md en orden. No aceptes tareas que declaren fuera de alcance una implementación exigida por el ticket; corrige el plan y ejecútalo.
+Antes de modificar un archivo existente debes leerlo.
+Marca [x] únicamente después de completar realmente la tarea.
+Al finalizar ejecuta: - python - lint - test - build
+Si una verificación falla por la implementación, corrige el problema y vuelve a ejecutarla.
+No archives OpenSpec y no modifiques Linear.
+", agent="Senior Software Developer", status="completed", output="Todas las verificaciones pasan con código 0. El cambio OpenSpec `dev-36` está completo y verificado.
+
+## Análisis del fallo previo (attempt-003)
+
+El `attempt-003.md` registra un fallo de tipo `infrastructure` con resumen "Reviewer no devolvió un resultado estructurado válido". Las verificaciones (`python`, `lint`, `test`, `build`, `playwright`, `openspec`) están en estado `skipped`. Es un fallo del propio revisor, no del cambio OpenSpec: las specs, design y tasks ya estaban alineadas con `CONTEXT.md` (Incremento 0, secciones 3.1/4.1/4.2/12, casos `BND-IAM-*`) y el `openspec validate dev-36 --strict --no-interactive` ya pasaba con exit code 0. No he modificado las specs ni los criterios de aceptación para "ocultar" el fallo porque el problema no estaba en el contrato.
+
+## Verificación de estado del repositorio (no toco código)
+
+He leído todos los artefactos y confirmado que la implementación de la Fase B ya está materializada:
+
+- **Modelo Prisma** (`apps/api/prisma/schema.prisma`): enums `AuditScope`, `AuditActorType` y modelo `AuditEvent` con `@@unique([scope, transitionKey])` y los 4 índices secundarios declarados.
+- **Migración** (`apps/api/prisma/migrations/20260831022809_add_audit_event/migration.sql`): incluye `CREATE TYPE`, `CREATE TABLE`, índices, función `audit_event_block_mutations()`, trigger `audit_event_append_only` `BEFORE UPDATE OR DELETE` con `RAISE EXCEPTION 'AuditEvent is append-only'`, y `REVOKE UPDATE, DELETE ON TABLE "AuditEvent" FROM PUBLIC`.
+- **`AuditService`** (`apps/api/src/audit/audit.service.ts`): aplica allowlist + exclusión + cálculo canónico de `transitionKey` + idempotencia (P2002 → `created: false` si el `correlationId` coincide, `AuditTransitionConflictException` si difiere) + búsqueda con aislamiento. No expone `update`/`delete`/`patch`/`truncate`.
+- **`AuditController`** (`apps/api/src/audit/audit.controller.ts`): `GET`/`POST /api/v1/audit-events` con Zod y proyección por `auditSearchResponseSchema` que no declara `transitionKey`.
+- **`AuditEchoController`** (`apps/api/src/audit-echo/`): smoke gated por `ENABLE_AUDIT_ECHO=true`, registrado en `AppModule` y activado en `global-setup.ts`.
+- **Excepciones y códigos**: `AUDIT_INVALID_FIELD` (400) y `AUDIT_TRANSITION_CONFLICT` (409) añadidos al enum; `ApiExceptionFilter` respeta el `code` explícito y conserva `IDEMPOTENCY_KEY_REUSED` como valor por defecto solo para 409 sin `code` explícito (verificado por `api-exception.filter.spec.ts`).
+- **OpenAPI**: tag `audit` en Swagger, ejemplos `auditInvalidFieldExample` y `auditTransitionConflictExample` en el schema de error.
+- **Pruebas**: 12 tests unitarios en `audit.service.spec.ts` (allowlist, exclusión, idempotencia, conflicto, scope, before/after vacíos → null), 20 en `audit.constants.spec.ts`, 7 en `canonical-transition-key.spec.ts`. Integración en `apps/api/test/integration/audit.integration.spec.ts` cubre persistencia, idempotencia, bloqueo de UPDATE/DELETE por trigger SQL, búsqueda filtrada y aislamiento por organización.
+
+## Resultado de verificaciones (ejecutadas)
+
+```
+python  → Exit code: 0
+lint    → Exit code: 0  (pnpm -r lint, 5/6 proyectos; sólo aviso no bloqueante de ESLintIgnoreWarning)
+test    → Exit code: 0  (62 tests passed en 8 archivos; incluye los 39 tests de auditoría)
+build   → Exit code: 0  (nest build + next build + tsc en paquetes)
+```
+
+## Tareas de `tasks.md`
+
+Todas las tareas de la Fase A (artefactos OpenSpec: A.1, A.2, A.3, A.4) y de la Fase B (implementación: 1.1–1.3, 2.1–2.2, 3.1–3.2, 4.1–4.4, 5.1–5.2, 6.1–6.2, 7.1–7.3, 8.1–8.3, 9.1) están marcadas como completadas `[x]` con verificación real. La sección `V.1` (`openspec validate dev-36 --strict --no-interactive` → exit 0) y `V.2` (`prisma validate`/`db:verify`/`test`/`test:integration` → exit 0) están igualmente completadas.
+
+## Archivos modificados en este intento
+
+Ninguno. El estado del repositorio ya cumple el contrato del cambio OpenSpec `dev-36` y todas las verificaciones pasan. He confirmado la trazabilidad 1-a-1 entre cada criterio de aceptación (CA1–CA5), los Requirements del spec y las tareas de implementación, sin declarar fuera de alcance ninguna parte exigida por el ticket DEV-36."
+2026-08-31 14:08:40: task_name="testing_task", task="Lee design.md y todas las specs de 'dev-36'.
+Si design.md contiene:
+Browser E2E: not_required
+no abras navegador y devuelve status=skipped.
+Si contiene:
+Browser E2E: required
+ejecuta este flujo:
+1. Usa 'Gestionar Entorno Local' con start. 2. Obtén la URL devuelta. 3. Usa 'Ejecutar Playwright' con open y esa URL. 4. Usa snapshot --raw para inspeccionar la página. 5. Ejecuta únicamente los Scenarios relevantes. 6. Usa las verificaciones de Playwright cuando sea posible. 7. Consulta console error o network cuando un fallo
+   necesite diagnóstico.
+8. Cierra Playwright. 9. Detén el entorno local.
+No uses MCP. No uses skills. No modifiques código.
+Si un Scenario falla: status=failed.
+Si todos pasan: status=passed.
+Nunca inventes un resultado.
+", agent="Browser QA Tester", status="started"
+2026-08-31 14:09:08: task_name="testing_task", task="Lee design.md y todas las specs de 'dev-36'.
+Si design.md contiene:
+Browser E2E: not_required
+no abras navegador y devuelve status=skipped.
+Si contiene:
+Browser E2E: required
+ejecuta este flujo:
+1. Usa 'Gestionar Entorno Local' con start. 2. Obtén la URL devuelta. 3. Usa 'Ejecutar Playwright' con open y esa URL. 4. Usa snapshot --raw para inspeccionar la página. 5. Ejecuta únicamente los Scenarios relevantes. 6. Usa las verificaciones de Playwright cuando sea posible. 7. Consulta console error o network cuando un fallo
+   necesite diagnóstico.
+8. Cierra Playwright. 9. Detén el entorno local.
+No uses MCP. No uses skills. No modifiques código.
+Si un Scenario falla: status=failed.
+Si todos pasan: status=passed.
+Nunca inventes un resultado.
+", agent="Browser QA Tester", status="completed", output="{"status": "skipped", "summary": "Browser E2E no es requerido según design.md. La estrategia de verificación indica 'Browser E2E: not_required' porque la superficie del cambio es 100% API HTTP y persistencia PostgreSQL, validada mediante pruebas de integración contra base de datos aislada. No existe UI que requiera verificación E2E de navegador.", "scenarios": []}"
+2026-08-31 14:09:08: task_name="review_task", task="Realiza la revisión final de 'dev-36'.
+Lee: - proposal.md - design.md - tasks.md - todas las specs - código relevante
+Comprueba: - todos los Requirements implementados; - todos los Scenarios cubiertos; - design respetado; - todas las tasks marcadas [x].
+Rechaza como retryable_failure un plan que declare fuera de alcance un criterio de aceptación.
+Ejecuta nuevamente: - python - lint - test - build
+Ejecuta:
+validate dev-36 --strict --no-interactive
+Considera también el resultado real del Tester.
+Si Browser E2E es required, Playwright debe estar passed.
+Si Browser E2E es not_required, Playwright puede estar skipped.
+Usa status=approved únicamente si todo es correcto.
+Usa status=retryable_failure cuando otra ejecución del Crew puede corregir el problema.
+Usa status=blocked cuando se requiere intervención humana por requisitos, configuración o dependencia externa.
+failure_type debe ser uno de: none implementation test infrastructure configuration requirements max_attempts
+Nunca archives OpenSpec. Nunca modifiques Linear.
+", agent="Quality Reviewer", status="started"
+2026-08-31 14:10:14: task_name="review_task", task="Realiza la revisión final de 'dev-36'.
+Lee: - proposal.md - design.md - tasks.md - todas las specs - código relevante
+Comprueba: - todos los Requirements implementados; - todos los Scenarios cubiertos; - design respetado; - todas las tasks marcadas [x].
+Rechaza como retryable_failure un plan que declare fuera de alcance un criterio de aceptación.
+Ejecuta nuevamente: - python - lint - test - build
+Ejecuta:
+validate dev-36 --strict --no-interactive
+Considera también el resultado real del Tester.
+Si Browser E2E es required, Playwright debe estar passed.
+Si Browser E2E es not_required, Playwright puede estar skipped.
+Usa status=approved únicamente si todo es correcto.
+Usa status=retryable_failure cuando otra ejecución del Crew puede corregir el problema.
+Usa status=blocked cuando se requiere intervención humana por requisitos, configuración o dependencia externa.
+failure_type debe ser uno de: none implementation test infrastructure configuration requirements max_attempts
+Nunca archives OpenSpec. Nunca modifiques Linear.
+", agent="Quality Reviewer", status="completed", output="He verificado de forma independiente el cambio `dev-36`:
+
+- **`proposal.md`**: completo, con Problema, Objetivo, Alcance (10 puntos), Fuera de Alcance, Impacto, Riesgos y Mitigaciones, Trazabilidad con `CONTEXT.md` e Ambigüedades Reconocidas. No declara fuera de alcance ningún criterio de aceptación del ticket.
+- **`specs/audit-append-only/spec.md`**: 8 Requirements con sus Scenarios verificables cubriendo los 5 criterios de aceptación CA1–CA5 (estructura mínima con alcance/actor/acción/entidad/instante/correlación; allowlist + exclusión de secretos; inmutabilidad via trigger SQL y REVOKE; búsqueda con aislamiento por organización; idempotencia por `(scope, transitionKey)`; propagación de `correlationId`; `transitionKey` nunca en respuestas; `AUDIT_TRANSITION_CONFLICT` mapeado a 409 sin debilitar `IDEMPOTENCY_KEY_REUSED`).
+- **`design.md`**: 10 Decisiones de Diseño y exactamente una sección `## Verification Strategy - Browser E2E: not_required` con razón breve (superficie 100% API HTTP + PostgreSQL, validada por integración contra base aislada).
+- **`tasks.md`**: tabla de trazabilidad CA→Spec→Tasks presente; todas las tareas de Fase A y Fase B marcadas `[x]`, incluyendo V.1 (validación OpenSpec) y V.2 (build/lint/test/migración).
+- **Verificaciones**: `python`, `lint`, `test`, `build` y `openspec validate dev-36 --strict --no-interactive` finalizan con exit code 0. Tests unitarios `audit.service.spec.ts` (12), `audit.constants.spec.ts` (20) y `canonical-transition-key.spec.ts` (7) en verde.
+- **Browser E2E**: `design.md` declara `not_required` con razón válida; al no ser required, no se exige Playwright.
+
+No archivado OpenSpec, no modificado Linear.
+
+```json
+{
+  "ticket_id": "DEV-36",
+  "change_id": "dev-36",
+  "status": "approved",
+  "failure_type": "none",
+  "failure_stage": null,
+  "summary": "Revisión final del cambio OpenSpec dev-36 completada. proposal.md, specs/audit-append-only/spec.md (8 Requirements / 27 Scenarios), design.md (10 Decisiones + Verification Strategy - Browser E2E: not_required con razón breve) y tasks.md (Fase A y Fase B completas, todas las tareas [x], tabla de trazabilidad CA1-CA5 → Spec → Tareas) son correctos y consistentes con CONTEXT.md (Incremento 0, secciones 3.1/4.1/4.2/12, BND-IAM-*). El diseño se respeta en el código (modelo AuditEvent con @@unique([scope, transitionKey]), migración con trigger BEFORE UPDATE OR DELETE y REVOKE UPDATE,DELETE FROM PUBLIC, AuditService con allowlist + exclusión + idempotencia + aislamiento, AuditController sin transitionKey en DTOs, AuditEchoController gated por ENABLE_AUDIT_ECHO, ApiExceptionFilter conserva IDEMPOTENCY_KEY_REUSED). Verificaciones python/lint/test/build/openspec validate --strict --no-interactive ejecutadas con exit code 0; 62 tests passed (39 específicos de auditoría). Browser E2E no requerido por design.md, por lo que Playwright skipped es aceptable.",
+  "verification": {
+    "python": "passed (exit 0)",
+    "lint": "passed (exit 0)",
+    "test": "passed (exit 0, 62/62 tests, 39 específicos de auditoría)",
+    "build": "passed (exit 0, nest build + next build + tsc)",
+    "openspec_validate_strict": "passed (exit 0, 'Change dev-36 is valid')",
+    "browser_e2e": "not_required by design.md (superficie 100% API HTTP + PostgreSQL, validada por integración contra base aislada); playwright skipped aceptable",
+    "implementation": "todos los CA1-CA5 implementados, todos los Scenarios cubiertos, todas las tasks marcadas [x], ningún criterio de aceptación declarado fuera de alcance"
+  }
+}
+```"
