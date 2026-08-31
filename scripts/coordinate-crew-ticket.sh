@@ -51,7 +51,11 @@ current_branch="$(git branch --show-current)"
 if [[ "$current_branch" != "$branch_name" ]]; then
   [[ -z "$(git status --porcelain)" ]] \
     || block 'dirty working tree'
-  git switch "$branch_name"
+  if git show-ref --verify --quiet "refs/heads/$branch_name"; then
+    git switch "$branch_name"
+  else
+    git switch -c "$branch_name"
+  fi
 fi
 
 started="$(queue start "$ticket_id")"

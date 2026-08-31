@@ -21,9 +21,23 @@ fi
 cat >"$fixture/bin/git" <<'GIT'
 #!/usr/bin/env bash
 
-if [[ "$*" == 'branch --show-current' ]]; then
-  printf '%s\n' 'feat/dev-31'
-fi
+case "$*" in
+  'branch --show-current')
+    printf '%s\n' main
+    ;;
+  'status --porcelain')
+    ;;
+  'show-ref --verify --quiet refs/heads/feat/dev-31'|\
+  'show-ref --verify --quiet refs/remotes/origin/feat/dev-31')
+    exit 1
+    ;;
+  'switch -c feat/dev-31')
+    : >"$MOCK_ROOT/created-branch"
+    ;;
+  *)
+    exit 97
+    ;;
+esac
 GIT
 chmod +x "$fixture/bin/git"
 
@@ -84,6 +98,10 @@ set -e
 }
 [[ ! -f "$fixture/opencode-called" ]] || {
   printf 'FAIL: Ralph invoked OpenCode while supervising CrewAI\n' >&2
+  exit 1
+}
+[[ -f "$fixture/created-branch" ]] || {
+  printf 'FAIL: Ralph did not create the missing ticket branch\n' >&2
   exit 1
 }
 
