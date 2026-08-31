@@ -23,6 +23,7 @@ calls=$((calls + 1))
 printf '%s\n' "$calls" >"$calls_file"
 
 if [[ "$calls" == 1 ]]; then
+  [[ "${CREW_TICKET_WAIT_SECONDS:-}" == 30 ]] || exit 11
   printf '%s\n' '<promise>TICKET:DEV-31</promise>'
   exit 0
 fi

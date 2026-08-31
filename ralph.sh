@@ -156,6 +156,8 @@ if $UNTIL_FINALIZED && ! $MAX_ITERATIONS_SET; then
   MAX_ITERATIONS=0
 fi
 
+export CREW_TICKET_WAIT_SECONDS="${CREW_TICKET_WAIT_SECONDS:-30}"
+
 command -v opencode >/dev/null 2>&1 \
   || die "opencode no está instalado"
 
