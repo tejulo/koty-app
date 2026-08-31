@@ -1,7 +1,7 @@
 ---
 description: Orquesta Linear -> CrewAI sin implementar código
 mode: primary
-model: openai/gpt-5.5
+model: openai/gpt-5.6-terra
 temperature: 0.1
 steps: 30
 
