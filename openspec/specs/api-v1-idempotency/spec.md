@@ -148,4 +148,3 @@ El sistema SHALL define `IDEMPOTENCY_KEY_REUSED` as a predefined error code mapp
 - GIVEN la especificación de códigos de error
 - THEN `IDEMPOTENCY_KEY_REUSED` forma parte del conjunto de códigos predefinidos
 - AND coexiste con `VALIDATION_ERROR`, `NOT_FOUND`, `INTERNAL_ERROR`, `BAD_REQUEST`, `UNAUTHORIZED`
-
