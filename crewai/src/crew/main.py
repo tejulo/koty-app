@@ -18,8 +18,16 @@ load_dotenv(CREWAI_ROOT / ".env")
 os.environ["CREWAI_TRACING_ENABLED"] = "false"
 os.environ["OTEL_SDK_DISABLED"] = "true"
 
+MAX_DIAGNOSTIC_REPAIR_ATTEMPTS = 1
+
 
 from .crew import KotyAppCrew
+from .evidence import (
+    diagnose_integration_failure,
+    load_attempt_evidence,
+    save_integration_diagnosis,
+    validate_reviewer_evidence,
+)
 from .models import (
     CrewExecution,
     CrewResult,
@@ -181,6 +189,18 @@ def next_attempt(change_id: str) -> int:
     ) + 1
 
 
+def reserve_attempt(
+    change_id: str,
+    execution: CrewExecution,
+) -> int:
+    execution.last_attempt = max(
+        execution.last_attempt,
+        next_attempt(change_id) - 1,
+    ) + 1
+    save_execution(change_id, execution)
+    return execution.last_attempt
+
+
 def last_attempt(change_id: str) -> str:
     attempts = attempt_files(change_id)
 
@@ -194,6 +214,14 @@ def last_attempt(change_id: str) -> str:
     )
 
 
+def last_evidence_path(change_id: str) -> str:
+    attempts = attempt_files(change_id)
+    if not attempts:
+        return "NONE"
+    path = attempts[-1].with_suffix("").with_suffix(".verification.json")
+    return path.relative_to(PROJECT_ROOT).as_posix() if path.exists() else "NONE"
+
+
 def save_result(
     change_id: str,
     result: CrewResult,
@@ -205,12 +233,13 @@ def save_result(
             "No existe el cambio OpenSpec activo"
         )
 
-    (
-        path / "result.json"
-    ).write_text(
+    result_path = path / "result.json"
+    temporary_path = result_path.with_suffix(".json.tmp")
+    temporary_path.write_text(
         result.model_dump_json(indent=2),
         encoding="utf-8",
     )
+    os.replace(temporary_path, result_path)
 
 
 def save_attempt(
@@ -298,9 +327,30 @@ def runtime_failure(
             lint="skipped",
             test="skipped",
             build="skipped",
+            integration="skipped",
             playwright="skipped",
             openspec="skipped",
         ),
+    )
+
+
+def verification_evidence_failure(
+    ticket_id: str,
+    change_id: str,
+    attempt: int,
+    reason: str,
+    result: CrewResult,
+) -> CrewResult:
+    return CrewResult(
+        ticket_id=ticket_id,
+        change_id=change_id,
+        attempt=attempt,
+        evidence=result.evidence,
+        status="blocked",
+        failure_type="configuration",
+        failure_stage="verification_evidence",
+        summary=reason,
+        verification=result.verification,
     )
 
 
@@ -365,6 +415,7 @@ def normalize_crew_result(payload: object) -> object:
             "lint",
             "test",
             "build",
+            "integration",
             "playwright",
             "openspec",
         )
@@ -416,6 +467,7 @@ def max_attempts_result(
             lint="skipped",
             test="skipped",
             build="skipped",
+            integration="skipped",
             playwright="skipped",
             openspec="skipped",
         ),
@@ -445,6 +497,63 @@ def execution_attempts(
             )
         ),
     )
+
+
+def apply_failure_accounting(
+    execution: CrewExecution,
+    result: CrewResult,
+    diagnosis: dict[str, object] | None = None,
+) -> bool:
+    if result.status != "retryable_failure":
+        return False
+
+    fingerprint = diagnosis.get("fingerprint") if diagnosis else None
+    shared_harness = (
+        diagnosis is not None
+        and diagnosis.get("category") == "shared_test_harness"
+        and isinstance(fingerprint, str)
+        and fingerprint not in execution.diagnosed_fingerprints
+        and execution.diagnostic_repair_attempts
+        < MAX_DIAGNOSTIC_REPAIR_ATTEMPTS
+    )
+    execution.last_failure_type = result.failure_type
+    if shared_harness:
+        execution.diagnostic_repair_attempts += 1
+        execution.diagnosed_fingerprints.append(fingerprint)
+        return True
+    if result.failure_type == "infrastructure":
+        execution.infrastructure_attempts += 1
+    else:
+        execution.attempts += 1
+    return False
+
+
+def diagnose_result(
+    change_id: str,
+    attempt: int,
+    result: CrewResult,
+) -> tuple[dict[str, object] | None, str | None]:
+    del result
+    run = next(
+        (
+            run
+            for run in reversed(
+                load_attempt_evidence(change_id, attempt)["executions"]
+            )
+            if run["gate"] == "integration" and run["exitCode"] != 0
+        ),
+        None,
+    )
+    if not run:
+        return None, None
+    output_path = PROJECT_ROOT / run["outputPath"]
+    if not output_path.is_file():
+        return None, None
+    diagnosis = diagnose_integration_failure(
+        output_path.read_text(encoding="utf-8")
+    )
+    path = save_integration_diagnosis(change_id, attempt, diagnosis)
+    return diagnosis, path.relative_to(PROJECT_ROOT).as_posix()
 
 
 def run():
@@ -503,24 +612,36 @@ def run():
         )
         return
 
+    record_attempt = reserve_attempt(change_id, execution)
+    previous_diagnosis_path = execution.last_diagnosis_path
+    evidence_environment = {
+        name: os.environ.get(name)
+        for name in (
+            "CREW_VERIFICATION_CHANGE_ID",
+            "CREW_VERIFICATION_ATTEMPT",
+            "CREW_TICKET_ID",
+        )
+    }
+
     try:
-        record_attempt = next_attempt(change_id)
-        output = (
-            KotyAppCrew()
-            .crew()
-            .kickoff(
-                inputs={
-                    "ticket_id": ticket_id,
-                    "change_id": change_id,
-                    "attempt": execution.attempts + 1,
-                    "last_attempt_path": (
-                        last_attempt(change_id)
-                    ),
-                }
-            )
+        os.environ["CREW_VERIFICATION_CHANGE_ID"] = change_id
+        os.environ["CREW_VERIFICATION_ATTEMPT"] = str(record_attempt)
+        os.environ["CREW_TICKET_ID"] = ticket_id
+        output = KotyAppCrew().crew().kickoff(
+            inputs={
+                "ticket_id": ticket_id,
+                "change_id": change_id,
+                "attempt": record_attempt,
+                "last_attempt_path": last_attempt(change_id),
+                "last_evidence_path": last_evidence_path(change_id),
+                "last_integration_diagnosis_path": (
+                    previous_diagnosis_path or "NONE"
+                ),
+            }
         )
 
         result = parse_crew_result(output)
+        result.attempt = record_attempt
 
         if (
             result.ticket_id.upper()
@@ -537,6 +658,20 @@ def run():
                 "a otro change_id"
             )
 
+        evidence_error = validate_reviewer_evidence(
+            change_id,
+            result,
+            record_attempt,
+        )
+        if evidence_error:
+            result = verification_evidence_failure(
+                ticket_id,
+                change_id,
+                record_attempt,
+                evidence_error,
+                result,
+            )
+
     except Exception as error:
         traceback.print_exc()
         result = runtime_failure(
@@ -546,8 +681,20 @@ def run():
         )
 
     finally:
+        for name, value in evidence_environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
         close_playwright_session()
         close_local_environment()
+
+    diagnosis, diagnosis_path = diagnose_result(
+        change_id,
+        record_attempt,
+        result,
+    )
+    execution.last_diagnosis_path = None
 
     save_result(
         change_id,
@@ -555,17 +702,21 @@ def run():
     )
 
     if result.status != "approved":
-        execution.last_failure_type = result.failure_type
-        if result.failure_type == "infrastructure":
-            execution.infrastructure_attempts += 1
-        else:
-            execution.attempts += 1
+        granted_repair_credit = apply_failure_accounting(
+            execution,
+            result,
+            diagnosis,
+        )
+        if granted_repair_credit:
+            execution.last_diagnosis_path = diagnosis_path
         save_execution(change_id, execution)
         save_attempt(
             change_id,
             record_attempt,
             result,
         )
+    else:
+        save_execution(change_id, execution)
 
     print(
         result.model_dump_json(indent=2)

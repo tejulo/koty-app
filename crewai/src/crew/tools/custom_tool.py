@@ -12,6 +12,8 @@ import requests
 from crewai.tools import tool
 from crewai.tools.tool_failure import ToolFailure
 
+from ..evidence import record_active_gate_execution
+from ..integration_env import environment
 from ..linear_api import get_issue
 
 
@@ -143,12 +145,11 @@ def _run(
 
 
 @tool("Buscar Tarea en Linear")
-def buscar_tarea_linear(
-    ticket_id: str,
-) -> str | ToolFailure:
+def buscar_tarea_linear() -> str | ToolFailure:
     """Obtiene un ticket real desde Linear."""
 
     try:
+        ticket_id = os.environ["CREW_TICKET_ID"]
         issue = get_issue(ticket_id)
 
         return _truncate(
@@ -363,7 +364,19 @@ def ejecutar_openspec(
             else "ERROR OPENSPEC"
         )
 
-        return f"{prefix}\n\n{output}"
+        evidence_id = (
+            record_active_gate_execution(
+                "openspec",
+                ["pnpm", "exec", "openspec", *args],
+                PROJECT_ROOT,
+                code,
+                output,
+            )
+            if args[0] == "validate"
+            else None
+        )
+        suffix = f"\n\nEvidence: {evidence_id}" if evidence_id else ""
+        return f"{prefix}\n\n{output}{suffix}"
 
     except Exception as error:
         return f"Error: {error}"
@@ -371,9 +384,15 @@ def ejecutar_openspec(
 
 @tool("Ejecutar Verificacion")
 def ejecutar_verificacion(
-    verificacion: Literal["python", "lint", "test", "build"],
+    verificacion: Literal[
+        "python",
+        "lint",
+        "test",
+        "build",
+        "integration",
+    ],
 ) -> str:
-    """Ejecuta una etiqueta exacta: python, lint, test o build; no recibe comandos shell."""
+    """Ejecuta una etiqueta exacta; no recibe comandos shell."""
 
     commands = {
         "python": (
@@ -404,16 +423,49 @@ def ejecutar_verificacion(
 
     name = verificacion.strip().lower()
 
-    if name not in commands:
+    if name not in commands and name != "integration":
         return (
-            "Error: usa python, lint, test o build"
+            "Error: usa python, lint, test, build o integration"
         )
 
-    command, cwd = commands[name]
+    if name == "integration":
+        bootstrap = ["pnpm", "db:start"]
+        env = environment(PROJECT_ROOT)
+        code, output = _run(bootstrap, cwd=PROJECT_ROOT, env=env)
+
+        if code != 0:
+            evidence_id = record_active_gate_execution(
+                name,
+                bootstrap,
+                PROJECT_ROOT,
+                code,
+                output,
+            )
+            suffix = (
+                f"\n\nEvidence: {evidence_id}"
+                if evidence_id
+                else ""
+            )
+            return (
+                "VERIFICACIÓN FALLIDA: integration\n\n"
+                "No se pudo iniciar la base de datos para integración.\n\n"
+                f"{output}{suffix}"
+            )
+
+        command = [
+            "pnpm",
+            "--filter",
+            "@koty-app/api",
+            "test:integration",
+        ]
+        cwd = PROJECT_ROOT
+    else:
+        command, cwd = commands[name]
 
     code, output = _run(
         command,
         cwd=cwd,
+        env=env if name == "integration" else None,
     )
 
     prefix = (
@@ -422,9 +474,15 @@ def ejecutar_verificacion(
         else "VERIFICACIÓN FALLIDA"
     )
 
-    return (
-        f"{prefix}: {name}\n\n{output}"
+    evidence_id = record_active_gate_execution(
+        name,
+        command,
+        cwd,
+        code,
+        output,
     )
+    suffix = f"\n\nEvidence: {evidence_id}" if evidence_id else ""
+    return f"{prefix}: {name}\n\n{output}{suffix}"
 
 
 PLAYWRIGHT_COMMANDS = {

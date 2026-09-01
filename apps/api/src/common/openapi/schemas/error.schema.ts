@@ -30,6 +30,26 @@ export const auditTransitionConflictExample = {
   correlationId: '550e8400-e29b-41d4-a716-446655440000',
 };
 
+export const outboxSemanticConflictExample = {
+  code: 'OUTBOX_SEMANTIC_CONFLICT',
+  message:
+    'Outbox semantic key reused with a different payload (DEV-32)',
+  fieldErrors: [],
+  correlationId: '550e8400-e29b-41d4-a716-446655440000',
+};
+
+export const outboxPayloadTooLargeExample = {
+  code: 'OUTBOX_PAYLOAD_TOO_LARGE',
+  message: 'Outbox payload exceeds the maximum allowed size (DEV-32)',
+  fieldErrors: [
+    {
+      field: 'payload',
+      message: 'payload must be at most 65536 bytes (got 70000)',
+    },
+  ],
+  correlationId: '550e8400-e29b-41d4-a716-446655440000',
+};
+
 export const errorResponseSchema = {
   type: 'object',
   required: ['code', 'message', 'fieldErrors', 'correlationId'],
@@ -47,6 +67,8 @@ export const errorResponseSchema = {
         'IDEMPOTENCY_KEY_REUSED',
         'AUDIT_TRANSITION_CONFLICT',
         'AUDIT_INVALID_FIELD',
+        'OUTBOX_SEMANTIC_CONFLICT',
+        'OUTBOX_PAYLOAD_TOO_LARGE',
       ],
     },
     message: {
@@ -79,6 +101,14 @@ export const errorResponseSchema = {
       summary: 'Conflicto de transición de auditoría (DEV-36)',
       value: auditTransitionConflictExample,
     },
+    outboxSemanticConflict: {
+      summary: 'Conflicto de clave semántica del outbox (DEV-32)',
+      value: outboxSemanticConflictExample,
+    },
+    outboxPayloadTooLarge: {
+      summary: 'Payload del outbox demasiado grande (DEV-32)',
+      value: outboxPayloadTooLargeExample,
+    },
   },
 };
 
@@ -109,4 +139,24 @@ export const auditTransitionConflictSchema = {
     'un registro existente con un correlationId distinto',
   properties: errorResponseSchema.properties,
   example: auditTransitionConflictExample,
+};
+
+export const outboxSemanticConflictSchema = {
+  type: 'object',
+  required: ['code', 'message', 'fieldErrors', 'correlationId'],
+  description:
+    'Respuesta de error cuando una clave semántica del outbox se reutiliza ' +
+    'con un payload distinto (DEV-32)',
+  properties: errorResponseSchema.properties,
+  example: outboxSemanticConflictExample,
+};
+
+export const outboxPayloadTooLargeSchema = {
+  type: 'object',
+  required: ['code', 'message', 'fieldErrors', 'correlationId'],
+  description:
+    'Respuesta de error cuando el payload del outbox excede el tamaño ' +
+    'máximo permitido (DEV-32)',
+  properties: errorResponseSchema.properties,
+  example: outboxPayloadTooLargeExample,
 };

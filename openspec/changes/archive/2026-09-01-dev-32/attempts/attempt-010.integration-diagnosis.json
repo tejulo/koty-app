@@ -1,0 +1,17 @@
+{
+  "category": "shared_test_harness",
+  "affected": [
+    "AuditController",
+    "AuditEchoController",
+    "IdempotencyEchoController",
+    "OutboxEchoController: expected [ 'AuditController'",
+    "\u2026(3) ] to deeply equal []"
+  ],
+  "fingerprint": "e07ba6d257e6db7120b63a6414e737225fe2a287dd53799acda0ddee908b5560",
+  "repairHint": "Configura Vitest con SWC y decoratorMetadata.",
+  "repairScope": [
+    "apps/api/vitest.config.integration.ts",
+    "apps/api/package.json",
+    "pnpm-lock.yaml"
+  ]
+}

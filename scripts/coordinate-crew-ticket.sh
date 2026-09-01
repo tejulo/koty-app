@@ -79,7 +79,7 @@ while true; do
       exit 0
       ;;
     blocked)
-      block "$(printf '%s' "$finalization" | json_field reason)"
+      $RESUME || block "$(printf '%s' "$finalization" | json_field reason)"
       ;;
     retry)
       sleep "$RETRY_DELAY_SECONDS"
@@ -96,16 +96,20 @@ while true; do
   worker_args=("$ticket_id" --start)
   if $RESUME; then
     worker_args+=(--resume)
-    RESUME=false
   fi
   worker="$("$ROOT/scripts/run-crew-ticket.sh" "${worker_args[@]}")"
   worker_status="$(printf '%s' "$worker" | json_field status)"
+  worker_started="$(printf '%s' "$worker" | json_field started)"
+
+  if [[ "$worker_started" == "True" ]]; then
+    RESUME=false
+  fi
 
   case "$worker_status" in
     approved|archived|running)
       ;;
     blocked)
-      block "$(printf '%s' "$worker" | json_field summary)"
+      $RESUME || block "$(printf '%s' "$worker" | json_field summary)"
       ;;
     retry|retryable_failure)
       sleep "$RETRY_DELAY_SECONDS"

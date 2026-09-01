@@ -17,9 +17,7 @@ from crewai.tools.tool_failure import (
     ToolFailurePolicy,
 )
 
-from .models import (
-    TesterResult,
-)
+from .models import TesterResult
 from .tools.custom_tool import (
     buscar_tarea_linear,
     ejecutar_openspec,
