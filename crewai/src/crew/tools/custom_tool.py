@@ -94,6 +94,14 @@ def _ignored(path: Path) -> bool:
     )
 
 
+def _within_repair_scope(path: Path) -> bool:
+    raw_scope = os.environ.get("CREW_REPAIR_SCOPE")
+    if not raw_scope:
+        return True
+    scopes = json.loads(raw_scope)
+    return any(path.is_relative_to(_resolve(scope)) for scope in scopes)
+
+
 def _run(
     command: list[str],
     cwd: Path = PROJECT_ROOT,
@@ -210,6 +218,9 @@ def escribir_archivo_raiz(
 
         if _ignored(path):
             return "Error: ruta ignorada"
+
+        if not _within_repair_scope(path):
+            return "Error: ruta fuera del repairScope"
 
         path.parent.mkdir(
             parents=True,

@@ -1,0 +1,12 @@
+{
+  "category": "openspec_delta_missing",
+  "fingerprint": "5f039bd437eb301572df342d5eff73e93f6f3bd77de2f3b9fc69418e05f2e8c7",
+  "repairHint": "Agrega '## ADDED Requirements' antes de los Requirements del spec.",
+  "repairScope": [
+    "openspec/changes/<change>/specs"
+  ],
+  "evidence": {
+    "id": "77f74a17a6e945569095886e3f39a986",
+    "gate": "openspec"
+  }
+}

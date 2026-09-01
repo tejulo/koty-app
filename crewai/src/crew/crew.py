@@ -17,10 +17,9 @@ from crewai.tools.tool_failure import (
     ToolFailurePolicy,
 )
 
-from .models import TesterResult
+from .models import ReviewVerdict, TesterResult
 from .tools.custom_tool import (
     buscar_tarea_linear,
-    ejecutar_openspec,
     ejecutar_playwright,
     ejecutar_verificacion,
     escribir_archivo_raiz,
@@ -107,7 +106,6 @@ class KotyAppCrew:
                 leer_archivo_raiz,
                 listar_archivos_raiz,
                 escribir_archivo_raiz,
-                ejecutar_openspec,
             ],
             verbose=VERBOSE,
             allow_delegation=False,
@@ -163,8 +161,6 @@ class KotyAppCrew:
             tools=[
                 leer_archivo_raiz,
                 listar_archivos_raiz,
-                ejecutar_verificacion,
-                ejecutar_openspec,
             ],
             verbose=VERBOSE,
             allow_delegation=False,
@@ -210,26 +206,47 @@ class KotyAppCrew:
         return Task(
             config=self.tasks_config[
                 "review_task"
-            ]
+            ],
+            output_pydantic=ReviewVerdict,
+        )
+
+    @crew
+    def planning_crew(self) -> Crew:
+        return self._crew(
+            [self.analyst(), self.arquitect()],
+            [self.analysis_task(), self.architecture_task()],
+        )
+
+    @crew
+    def delivery_crew(self) -> Crew:
+        return self._crew(
+            [self.programer(), self.tester(), self.reviewer()],
+            [self.coding_task(), self.testing_task(), self.review_task()],
         )
 
     @crew
     def crew(self) -> Crew:
-        options = {
-            "agents": [
+        return self._crew(
+            [
                 self.analyst(),
                 self.arquitect(),
                 self.programer(),
                 self.tester(),
                 self.reviewer(),
             ],
-            "tasks": [
+            [
                 self.analysis_task(),
                 self.architecture_task(),
                 self.coding_task(),
                 self.testing_task(),
                 self.review_task(),
             ],
+        )
+
+    def _crew(self, agents, tasks) -> Crew:
+        options = {
+            "agents": agents,
+            "tasks": tasks,
             "process": Process.sequential,
             "verbose": VERBOSE,
             "tracing": False,

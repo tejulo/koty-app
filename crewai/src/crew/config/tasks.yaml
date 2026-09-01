@@ -34,6 +34,9 @@ architecture_task:
     Si '{last_attempt_path}' es distinto de 'NONE',
     lee también ese archivo y considera el fallo documentado.
 
+    Si '{last_repair_diagnosis_path}' es distinto de 'NONE',
+    lee ese diagnóstico y aplica repairHint solo dentro de repairScope.
+
     Inspecciona únicamente las partes relevantes del repositorio.
 
     No inspecciones:
@@ -74,16 +77,9 @@ architecture_task:
     mediante navegador: navegación, formularios,
     autenticación, UI o integración frontend/API visible.
 
-    Finalmente ejecuta:
-
-    validate {change_id} --strict --no-interactive
-
-    Corrige los artifacts si falla.
-
     Nunca archives el cambio.
   expected_output: >
-    Resumen de artifacts creados o actualizados y resultado
-    de OpenSpec validate.
+    Resumen de artifacts creados o actualizados.
   agent: arquitect
 
 
@@ -105,10 +101,10 @@ coding_task:
     diagnosticado ya no coincide, vuelve a ejecutar ese gate antes
     de editar usando sus líneas o columnas.
 
-    Si '{last_integration_diagnosis_path}' es distinto de 'NONE',
-    lee ese JSON antes de corregir integración. Si category es
-    shared_test_harness, aplica repairHint y solo usa repairScope para
-    infraestructura compartida. No debilites ni saltees pruebas.
+    Si '{last_repair_diagnosis_path}' es distinto de 'NONE',
+    lee ese JSON antes de corregir. Aplica repairHint y, si repairScope
+    no está vacío, escribe solo dentro de ese alcance. No debilites ni
+    saltees pruebas.
 
     No debilites specs o criterios de aceptación para hacer
     desaparecer un fallo.
@@ -200,30 +196,13 @@ review_task:
     - design respetado;
     - todas las tasks marcadas [x].
 
-    Si '{last_integration_diagnosis_path}' es distinto de 'NONE',
-    lee ese JSON. Para category shared_test_harness, acepta cambios
-    compartidos solo dentro de repairScope y exige que integración
-    vuelva a pasar sin saltear pruebas.
+    Si '{last_repair_diagnosis_path}' es distinto de 'NONE',
+    lee ese JSON. Si repairScope no está vacío, acepta cambios solo
+    dentro de ese alcance y exige que el gate fallido vuelva a pasar
+    sin saltear pruebas.
 
     Rechaza como retryable_failure un plan que declare
     fuera de alcance un criterio de aceptación.
-
-    Ejecuta nuevamente:
-    - python
-    - lint
-    - test
-    - build
-    - integration
-
-    Ejecuta:
-
-    validate {change_id} --strict --no-interactive
-
-    Después de revisar, ejecuta los seis gates y usa los IDs
-    `Evidence:` devueltos por las herramientas. Incluye en `evidence`
-    los IDs para `python`, `lint`, `test`, `build`, `integration` y `openspec`. El
-    runner asigna el intento. No declares un gate aprobado sin una
-    evidencia aprobada del mismo gate.
 
     Considera también el resultado real del Tester.
 
@@ -251,12 +230,9 @@ review_task:
     max_attempts
 
     Devuelve un único objeto JSON sin razonamiento ni markdown.
-    verification debe contener exactamente python, lint, test,
-    build, integration, playwright y openspec; cada valor es passed, failed o skipped.
-
     Nunca archives OpenSpec.
     Nunca modifiques Linear.
   expected_output: >
-    Resultado estructurado con ticket_id, change_id, evidence, status,
-    failure_type, failure_stage, summary y verification.
+    Resultado estructurado con ticket_id, change_id, status,
+    failure_type, failure_stage y summary.
   agent: reviewer

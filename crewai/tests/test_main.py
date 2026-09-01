@@ -8,7 +8,12 @@ from pydantic import ValidationError
 import crew.evidence as evidence_module
 import crew.main as main_module
 from crew.main import normalize
-from crew.models import CrewResult, VerificationResult
+from crew.models import (
+    CrewResult,
+    ReviewVerdict,
+    TesterResult as BrowserTesterResult,
+    VerificationResult,
+)
 
 
 def crew_result(status="retryable_failure", failure_type="implementation"):
@@ -196,20 +201,73 @@ def test_run_records_shared_integration_diagnosis_without_charging_ticket(
     )
 
 
-def test_run_passes_last_integration_diagnosis_to_crew(tmp_path, monkeypatch):
+def test_diagnose_result_links_the_failed_gate_evidence(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(evidence_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setenv("CREW_VERIFICATION_CHANGE_ID", "dev-6")
+    monkeypatch.setenv("CREW_VERIFICATION_ATTEMPT", "1")
+    (tmp_path / "openspec" / "changes" / "dev-6").mkdir(parents=True)
+    evidence_id = evidence_module.record_gate_execution(
+        "openspec",
+        ["pnpm", "exec", "openspec", "validate"],
+        tmp_path,
+        1,
+        "No delta sections found",
+    )
+
+    diagnosis, path = main_module.diagnose_result("dev-6", 1, crew_result())
+
+    assert diagnosis["evidence"] == {
+        "id": evidence_id,
+        "gate": "openspec",
+        "outputPath": next(
+            item["outputPath"]
+            for item in main_module.load_attempt_evidence("dev-6", 1)["executions"]
+        ),
+    }
+    assert json.loads((tmp_path / path).read_text(encoding="utf-8"))["evidence"] == (
+        diagnosis["evidence"]
+    )
+
+
+def test_diagnose_result_records_reviewer_feedback_without_failed_gate(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(main_module, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "openspec" / "changes" / "dev-6").mkdir(parents=True)
+    result = crew_result(status="retryable_failure", failure_type="implementation")
+    result.summary = "Falta cubrir el escenario de mora."
+
+    diagnosis, path = main_module.diagnose_result("dev-6", 1, result)
+
+    assert diagnosis["category"] == "reviewer_feedback"
+    assert diagnosis["repairHint"] == result.summary
+    assert json.loads((tmp_path / path).read_text(encoding="utf-8"))["repairScope"] == []
+
+
+def test_run_passes_last_repair_diagnosis_to_crew(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module, "PROJECT_ROOT", tmp_path)
     (tmp_path / "openspec" / "changes" / "dev-6").mkdir(parents=True)
     execution_path = tmp_path / ".agent" / "crew" / "dev-6" / "execution.json"
     execution_path.parent.mkdir(parents=True)
     execution_path.write_text(
-        '{"last_diagnosis_path":"attempts/attempt-001.integration-diagnosis.json"}',
+        '{"last_diagnosis_path":"attempts/attempt-001.repair-diagnosis.json"}',
+        encoding="utf-8",
+    )
+    diagnosis_path = tmp_path / "attempts" / "attempt-001.repair-diagnosis.json"
+    diagnosis_path.parent.mkdir()
+    diagnosis_path.write_text(
+        '{"repairScope":["openspec/changes/<change>/specs"]}',
         encoding="utf-8",
     )
     seen = {}
 
     def kickoff(**kwargs):
         seen.update(kwargs["inputs"])
-        return SimpleNamespace(pydantic=crew_result())
+        seen["repair_scope"] = os.environ.get("CREW_REPAIR_SCOPE")
+        return SimpleNamespace(
+            pydantic=crew_result(status="approved", failure_type="none")
+        )
 
     crew = SimpleNamespace(crew=lambda: SimpleNamespace(kickoff=kickoff))
     monkeypatch.setattr(main_module, "KotyAppCrew", lambda: crew)
@@ -220,9 +278,10 @@ def test_run_passes_last_integration_diagnosis_to_crew(tmp_path, monkeypatch):
 
     main_module.run()
 
-    assert seen["last_integration_diagnosis_path"] == (
-        "attempts/attempt-001.integration-diagnosis.json"
+    assert seen["last_repair_diagnosis_path"] == (
+        "attempts/attempt-001.repair-diagnosis.json"
     )
+    assert seen["repair_scope"] == '["openspec/changes/dev-6/specs"]'
     assert main_module.load_execution("dev-6").last_diagnosis_path is None
 
 
@@ -238,10 +297,17 @@ def test_run_clears_last_integration_diagnosis_after_approval(
         '{"last_diagnosis_path":"attempts/attempt-001.integration-diagnosis.json"}',
         encoding="utf-8",
     )
-    approved = crew_result(status="approved", failure_type="none")
+    approved = ReviewVerdict(
+        ticket_id="DEV-6",
+        change_id="dev-6",
+        status="approved",
+        summary="approved",
+    )
     crew = SimpleNamespace(
         crew=lambda: SimpleNamespace(
-            kickoff=lambda **_: SimpleNamespace(pydantic=approved)
+            kickoff=lambda **_: SimpleNamespace(
+                pydantic=crew_result(status="approved", failure_type="none")
+            )
         )
     )
     monkeypatch.setattr(main_module, "KotyAppCrew", lambda: crew)
@@ -382,7 +448,10 @@ def test_run_ignores_historical_attempts_in_a_new_execution(
         "infrastructure_attempts": 0,
         "diagnostic_repair_attempts": 0,
         "diagnosed_fingerprints": [],
-        "last_diagnosis_path": None,
+            "last_diagnosis_path": (
+                "openspec/changes/dev-6/attempts/"
+                "attempt-004.repair-diagnosis.json"
+            ),
         "last_failure_type": "implementation",
     }
 
@@ -421,7 +490,10 @@ def test_resume_starts_a_new_execution(tmp_path, monkeypatch):
         "infrastructure_attempts": 0,
         "diagnostic_repair_attempts": 0,
         "diagnosed_fingerprints": [],
-        "last_diagnosis_path": None,
+        "last_diagnosis_path": (
+            "openspec/changes/dev-6/attempts/"
+            "attempt-001.repair-diagnosis.json"
+        ),
         "last_failure_type": "implementation",
     }
 
@@ -500,6 +572,57 @@ def test_parse_crew_result_normalizes_reviewer_check_details():
         playwright="skipped",
         openspec="passed",
     )
+
+
+def test_parse_review_verdict_accepts_structured_reviewer_output():
+    verdict = ReviewVerdict(
+        ticket_id="DEV-6",
+        change_id="dev-6",
+        status="approved",
+        summary="reviewed",
+    )
+
+    result = main_module.parse_review_verdict(SimpleNamespace(pydantic=verdict))
+
+    assert result == verdict
+
+
+def test_review_verdict_accepts_the_documented_max_attempts_type():
+    verdict = ReviewVerdict(
+        ticket_id="DEV-6",
+        change_id="dev-6",
+        status="blocked",
+        failure_type="max_attempts",
+        summary="No quedan intentos.",
+    )
+
+    assert verdict.failure_type == "max_attempts"
+
+
+def test_required_browser_e2e_failure_overrides_reviewer_approval(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(main_module, "PROJECT_ROOT", tmp_path)
+    change = tmp_path / "openspec" / "changes" / "dev-6"
+    change.mkdir(parents=True)
+    (change / "design.md").write_text("Browser E2E: required", encoding="utf-8")
+    result = crew_result(status="approved", failure_type="none")
+    output = SimpleNamespace(
+        tasks_output=[
+            SimpleNamespace(
+                pydantic=BrowserTesterResult(
+                    status="failed",
+                    summary="El escenario de acceso falla.",
+                )
+            )
+        ]
+    )
+
+    checked = main_module.apply_tester_result("dev-6", output, result)
+
+    assert checked.status == "retryable_failure"
+    assert checked.failure_stage == "playwright"
+    assert checked.verification.playwright == "failed"
 
 
 def test_run_accepts_raw_reviewer_result_after_reasoning(
@@ -657,6 +780,111 @@ def test_run_exposes_current_attempt_to_verification_tools(
     }
 
 
+def test_run_stops_after_an_invalid_openspec_preflight(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(evidence_module, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "openspec" / "changes" / "dev-6").mkdir(parents=True)
+    delivery_calls = []
+
+    planning = SimpleNamespace(kickoff=lambda **_: SimpleNamespace(raw="planned"))
+    delivery = SimpleNamespace(
+        kickoff=lambda **_: delivery_calls.append(True) or SimpleNamespace(raw="reviewed")
+    )
+    crew = SimpleNamespace(
+        planning_crew=lambda: planning,
+        delivery_crew=lambda: delivery,
+    )
+    monkeypatch.setattr(main_module, "KotyAppCrew", lambda: crew)
+    monkeypatch.setattr(
+        main_module,
+        "run_gate",
+        lambda name, _: SimpleNamespace(
+            name=name,
+            passed=False,
+            evidence_id="openspec-failed",
+            output="No delta sections found",
+        ),
+    )
+    monkeypatch.setattr(main_module, "close_playwright_session", lambda: None)
+    monkeypatch.setattr(main_module, "close_local_environment", lambda: None)
+    monkeypatch.setattr(main_module.sys, "argv", ["run_crew", "DEV-6"])
+
+    main_module.run()
+
+    payload = json.loads(
+        (tmp_path / "openspec" / "changes" / "dev-6" / "result.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert delivery_calls == []
+    assert payload["status"] == "retryable_failure"
+    assert payload["failure_stage"] == "openspec_preflight"
+    diagnosis_path = (
+        tmp_path
+        / "openspec"
+        / "changes"
+        / "dev-6"
+        / "attempts"
+        / "attempt-001.repair-diagnosis.json"
+    )
+    assert json.loads(diagnosis_path.read_text(encoding="utf-8"))["category"] == (
+        "openspec_delta_missing"
+    )
+
+
+def test_run_uses_supervisor_gate_evidence_after_delivery(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(evidence_module, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "openspec" / "changes" / "dev-6").mkdir(parents=True)
+    approved = ReviewVerdict(
+        ticket_id="DEV-6",
+        change_id="dev-6",
+        status="approved",
+        summary="approved",
+    )
+    planning = SimpleNamespace(kickoff=lambda **_: SimpleNamespace(raw="planned"))
+    delivery = SimpleNamespace(kickoff=lambda **_: SimpleNamespace(pydantic=approved))
+    crew = SimpleNamespace(
+        planning_crew=lambda: planning,
+        delivery_crew=lambda: delivery,
+    )
+    calls = []
+    monkeypatch.setattr(main_module, "KotyAppCrew", lambda: crew)
+    monkeypatch.setattr(
+        main_module,
+        "run_gate",
+        lambda name, _: calls.append(name)
+        or SimpleNamespace(
+            name=name,
+            passed=True,
+            evidence_id=f"{name}-evidence",
+            output="passed",
+        ),
+    )
+    monkeypatch.setattr(main_module, "close_playwright_session", lambda: None)
+    monkeypatch.setattr(main_module, "close_local_environment", lambda: None)
+    monkeypatch.setattr(main_module.sys, "argv", ["run_crew", "DEV-6"])
+
+    main_module.run()
+
+    payload = json.loads(
+        (tmp_path / "openspec" / "changes" / "dev-6" / "result.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert calls == [
+        "openspec",
+        "python",
+        "lint",
+        "test",
+        "build",
+        "integration",
+        "openspec",
+    ]
+    assert payload["status"] == "approved"
+    assert payload["evidence"]["openspec"] == "openspec-evidence"
+
+
 def test_runtime_failure_returns_infrastructure_result():
     result = main_module.runtime_failure(
         "DEV-6", "dev-6", RuntimeError("invalid output")
@@ -726,7 +954,10 @@ def test_run_keeps_infrastructure_attempts_separate(tmp_path, monkeypatch):
         "infrastructure_attempts": 2,
         "diagnostic_repair_attempts": 0,
         "diagnosed_fingerprints": [],
-        "last_diagnosis_path": None,
+            "last_diagnosis_path": (
+                "openspec/changes/dev-6/attempts/"
+                "attempt-001.repair-diagnosis.json"
+            ),
         "last_failure_type": "infrastructure",
     }
 
@@ -835,6 +1066,9 @@ def test_run_charges_ticket_budget_without_changing_infrastructure_budget(
         "infrastructure_attempts": 1,
         "diagnostic_repair_attempts": 0,
         "diagnosed_fingerprints": [],
-        "last_diagnosis_path": None,
+        "last_diagnosis_path": (
+            "openspec/changes/dev-6/attempts/"
+            "attempt-001.repair-diagnosis.json"
+        ),
         "last_failure_type": "implementation",
     }
