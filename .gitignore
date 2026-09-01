@@ -63,6 +63,7 @@ playwright-report/
 test-results/
 
 # Ralph runtime
+.agent/crew/
 .agent/logs/
 .agent/history/
 .agent/tasks.json
