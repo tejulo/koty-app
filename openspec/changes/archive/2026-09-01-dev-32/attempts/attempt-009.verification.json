@@ -1,0 +1,303 @@
+{
+  "schemaVersion": 1,
+  "attempt": 9,
+  "executions": [
+    {
+      "id": "4588b9b8ae774f5080e883ca8cdccac1",
+      "gate": "openspec",
+      "command": [
+        "pnpm",
+        "exec",
+        "openspec",
+        "validate",
+        "dev-32",
+        "--strict",
+        "--no-interactive"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:35:58.452744+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.4588b9b8ae774f5080e883ca8cdccac1.log",
+      "outputSha256": "dfbbe855eb42da942f9e609121c8865dedaf7e1c53d4813b3c74873d1323049a",
+      "diagnostics": []
+    },
+    {
+      "id": "88f9f7c49732454cbe0c133ad7c798b4",
+      "gate": "openspec",
+      "command": [
+        "pnpm",
+        "exec",
+        "openspec",
+        "validate",
+        "dev-32",
+        "--strict",
+        "--no-interactive"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:38:16.570175+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.88f9f7c49732454cbe0c133ad7c798b4.log",
+      "outputSha256": "dfbbe855eb42da942f9e609121c8865dedaf7e1c53d4813b3c74873d1323049a",
+      "diagnostics": []
+    },
+    {
+      "id": "d65020a71d8246fd94ea1f646095ae3e",
+      "gate": "openspec",
+      "command": [
+        "pnpm",
+        "exec",
+        "openspec",
+        "validate",
+        "dev-32",
+        "--strict",
+        "--no-interactive"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:38:26.111971+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.d65020a71d8246fd94ea1f646095ae3e.log",
+      "outputSha256": "dfbbe855eb42da942f9e609121c8865dedaf7e1c53d4813b3c74873d1323049a",
+      "diagnostics": []
+    },
+    {
+      "id": "fa05fe8702074e47b72b831c0aaabbd1",
+      "gate": "python",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "compileall",
+        "-q",
+        "src/crew"
+      ],
+      "cwd": "crewai",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:39:20.833356+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.fa05fe8702074e47b72b831c0aaabbd1.log",
+      "outputSha256": "131cb5fff0215051b66cedd92901ec0dab9c10752d6d356a0895c0340a402959",
+      "diagnostics": []
+    },
+    {
+      "id": "84e72249bf81488583ca3718ab0903a2",
+      "gate": "test",
+      "command": [
+        "pnpm",
+        "test"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:39:31.593898+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.84e72249bf81488583ca3718ab0903a2.log",
+      "outputSha256": "9611e432b9bb94c24159624cbd5363c1822faf7beed7ce7667924229732a9a7d",
+      "diagnostics": []
+    },
+    {
+      "id": "c8ba651b95b74245831f5b7c32d58459",
+      "gate": "build",
+      "command": [
+        "pnpm",
+        "build"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:39:46.402379+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.c8ba651b95b74245831f5b7c32d58459.log",
+      "outputSha256": "ff0196a9f8bac162315f2c3fd6d440eca0b631d6bbae723a19c61b07e7741a4a",
+      "diagnostics": []
+    },
+    {
+      "id": "65e2e941b4804aaab112e33657f7477a",
+      "gate": "lint",
+      "command": [
+        "pnpm",
+        "lint"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:39:49.135078+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.65e2e941b4804aaab112e33657f7477a.log",
+      "outputSha256": "25e4101e1168c432639284437223be09a00c873ce391c295421a568c92eb26ba",
+      "diagnostics": []
+    },
+    {
+      "id": "39dff42fbb6a4b8fbabe9e29042a37a6",
+      "gate": "integration",
+      "command": [
+        "pnpm",
+        "--filter",
+        "@koty-app/api",
+        "test:integration"
+      ],
+      "cwd": ".",
+      "exitCode": 1,
+      "createdAt": "2026-09-01T19:40:03.557940+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.39dff42fbb6a4b8fbabe9e29042a37a6.log",
+      "outputSha256": "2cee520b84c4c0acb3e8617b2c3c3abbe63a5e99f10f2ee30d9d089d138775d2",
+      "diagnostics": []
+    },
+    {
+      "id": "a5cafc4c043c49a39cd678cfa1c0a91f",
+      "gate": "integration",
+      "command": [
+        "pnpm",
+        "--filter",
+        "@koty-app/api",
+        "test:integration"
+      ],
+      "cwd": ".",
+      "exitCode": 1,
+      "createdAt": "2026-09-01T19:40:34.845134+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.a5cafc4c043c49a39cd678cfa1c0a91f.log",
+      "outputSha256": "fc21dea9076a40cd266e48fd1eb9c1c4a38bd26bb5906d00afe2cec9cf829b5c",
+      "diagnostics": []
+    },
+    {
+      "id": "50f1c320649a43b68dbe214fbc771460",
+      "gate": "integration",
+      "command": [
+        "pnpm",
+        "--filter",
+        "@koty-app/api",
+        "test:integration"
+      ],
+      "cwd": ".",
+      "exitCode": 1,
+      "createdAt": "2026-09-01T19:45:49.690224+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.50f1c320649a43b68dbe214fbc771460.log",
+      "outputSha256": "d0070cf0843153ac1cafd5e2497d7bad6b5047e05f0372ac548f687f077b9221",
+      "diagnostics": []
+    },
+    {
+      "id": "8a882acf77ed47e5a7942823c81bae4b",
+      "gate": "integration",
+      "command": [
+        "pnpm",
+        "--filter",
+        "@koty-app/api",
+        "test:integration"
+      ],
+      "cwd": ".",
+      "exitCode": 1,
+      "createdAt": "2026-09-01T19:46:45.254723+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.8a882acf77ed47e5a7942823c81bae4b.log",
+      "outputSha256": "5390759085c67b44d13e44db36f060b2db80ece5672e5dc4cbca073b8042059e",
+      "diagnostics": []
+    },
+    {
+      "id": "c1753c5d23b743719484b263fe9b511b",
+      "gate": "openspec",
+      "command": [
+        "pnpm",
+        "exec",
+        "openspec",
+        "validate",
+        "dev-32",
+        "--strict",
+        "--no-interactive"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:47:40.206330+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.c1753c5d23b743719484b263fe9b511b.log",
+      "outputSha256": "dfbbe855eb42da942f9e609121c8865dedaf7e1c53d4813b3c74873d1323049a",
+      "diagnostics": []
+    },
+    {
+      "id": "07229de28ae94441b35adad3ea238974",
+      "gate": "python",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "compileall",
+        "-q",
+        "src/crew"
+      ],
+      "cwd": "crewai",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:47:42.629090+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.07229de28ae94441b35adad3ea238974.log",
+      "outputSha256": "131cb5fff0215051b66cedd92901ec0dab9c10752d6d356a0895c0340a402959",
+      "diagnostics": []
+    },
+    {
+      "id": "2b95935f6f034f498a837343cc64a939",
+      "gate": "test",
+      "command": [
+        "pnpm",
+        "test"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:47:54.728854+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.2b95935f6f034f498a837343cc64a939.log",
+      "outputSha256": "581711401483d017d18db49d6a693ac079e2736b75a4b341de1be3b25e47f759",
+      "diagnostics": []
+    },
+    {
+      "id": "15a5e215e5ec426382f33dec6c5b4887",
+      "gate": "integration",
+      "command": [
+        "pnpm",
+        "--filter",
+        "@koty-app/api",
+        "test:integration"
+      ],
+      "cwd": ".",
+      "exitCode": 1,
+      "createdAt": "2026-09-01T19:48:11.915371+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.15a5e215e5ec426382f33dec6c5b4887.log",
+      "outputSha256": "510976f117f9c49a9ee090f168de261f7464a01d7d0dff1e6ed1c745cc1da566",
+      "diagnostics": []
+    },
+    {
+      "id": "136b31b211d94e07b49c0c9286e64a37",
+      "gate": "build",
+      "command": [
+        "pnpm",
+        "build"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:48:15.426381+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.136b31b211d94e07b49c0c9286e64a37.log",
+      "outputSha256": "fbb2b91b42a42f995099721cccba39dc046ef4a1c804da2178bc29a64a5b8550",
+      "diagnostics": []
+    },
+    {
+      "id": "5c97c809380e437680f36d329ce29d83",
+      "gate": "lint",
+      "command": [
+        "pnpm",
+        "lint"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:48:21.383898+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.5c97c809380e437680f36d329ce29d83.log",
+      "outputSha256": "06a229ad2abd001f62bca426342364f1c1924293f1edb58b954a57366414decc",
+      "diagnostics": []
+    },
+    {
+      "id": "29a9815919414340b1f4f668a6d1d660",
+      "gate": "openspec",
+      "command": [
+        "pnpm",
+        "exec",
+        "openspec",
+        "validate",
+        "dev-32",
+        "--strict",
+        "--no-interactive"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "createdAt": "2026-09-01T19:48:25.777506+00:00",
+      "outputPath": "openspec/changes/dev-32/attempts/attempt-009.verification.29a9815919414340b1f4f668a6d1d660.log",
+      "outputSha256": "dfbbe855eb42da942f9e609121c8865dedaf7e1c53d4813b3c74873d1323049a",
+      "diagnostics": []
+    }
+  ]
+}

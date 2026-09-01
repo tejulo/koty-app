@@ -4,6 +4,7 @@ packages:
 allowBuilds:
   '@fission-ai/openspec': true
   '@nestjs/core': true
+  '@swc/core': true
   '@prisma/client': true
   '@prisma/engines': true
   '@scarf/scarf': true

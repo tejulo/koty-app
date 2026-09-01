@@ -56,6 +56,10 @@ case "$*" in
   'run finalize_ticket DEV-31')
     if [[ "${MOCK_MODE:-}" == waiting ]]; then
       printf '%s\n' '{"status":"retry"}'
+    elif [[ "${MOCK_MODE:-}" == resume_blocked && ! -f "$MOCK_ROOT/resumed" ]] || \
+      [[ "${MOCK_MODE:-}" == resume_running && ! -f "$MOCK_ROOT/worker-finished" ]]; then
+      : >"$MOCK_ROOT/resumed"
+      printf '%s\n' '{"status":"blocked","reason":"previous evidence is blocked"}'
     elif [[ -f "$MOCK_ROOT/finalized" ]]; then
       printf '%s\n' '{"status":"done","finalized":true,"ticket_id":"DEV-31"}'
     else
@@ -84,8 +88,20 @@ cat >"$fixture/scripts/run-crew-ticket.sh" <<'RUNNER'
 
 printf '%s\n' "$*" >>"$MOCK_ROOT/runner-arguments"
 
+if [[ "${MOCK_MODE:-}" == resume_running && ! -f "$MOCK_ROOT/worker-finished" ]]; then
+  : >"$MOCK_ROOT/worker-finished"
+  printf '%s\n' '{"status":"running","ticket_id":"DEV-31","started":false}'
+  exit 0
+fi
+
+if [[ "${MOCK_MODE:-}" == resume_finished && ! -f "$MOCK_ROOT/worker-finished" ]]; then
+  : >"$MOCK_ROOT/worker-finished"
+  printf '%s\n' '{"status":"blocked","ticket_id":"DEV-31","started":false}'
+  exit 0
+fi
+
 printf '%s\n' 1 >>"$MOCK_ROOT/runner-calls"
-printf '%s\n' '{"status":"approved","ticket_id":"DEV-31"}'
+printf '%s\n' '{"status":"approved","ticket_id":"DEV-31","started":true}'
 RUNNER
 chmod +x "$fixture/scripts/run-crew-ticket.sh"
 
@@ -117,6 +133,46 @@ resume_output="$(PATH="$fixture/bin:$PATH" MOCK_ROOT="$fixture" \
 
 [[ "$(tail -n 1 "$fixture/runner-arguments")" == 'DEV-31 --start --resume' ]]
 [[ "$resume_output" == *'Ralph finalized DEV-31'* ]]
+
+rm -f "$fixture/finalized" "$fixture/resumed"
+
+resume_blocked_output="$(MOCK_MODE=resume_blocked PATH="$fixture/bin:$PATH" MOCK_ROOT="$fixture" \
+  "$fixture/ralph.sh" --until-finalized --resume)"
+
+[[ "$resume_blocked_output" == *'Ralph finalized DEV-31'* ]] || {
+  printf 'FAIL: Ralph did not resume from a blocked prior result\n' >&2
+  exit 1
+}
+
+rm -f "$fixture/finalized" "$fixture/resumed" "$fixture/worker-finished"
+
+resume_running_output="$(MOCK_MODE=resume_running PATH="$fixture/bin:$PATH" MOCK_ROOT="$fixture" \
+  "$fixture/ralph.sh" --until-finalized --resume)"
+
+[[ "$resume_running_output" == *'Ralph finalized DEV-31'* ]] || {
+  printf 'FAIL: Ralph lost --resume while a prior worker was running\n' >&2
+  exit 1
+}
+
+[[ "$(tail -n 1 "$fixture/runner-arguments")" == 'DEV-31 --start --resume' ]] || {
+  printf 'FAIL: Ralph did not retain --resume after a prior running worker\n' >&2
+  exit 1
+}
+
+rm -f "$fixture/finalized" "$fixture/resumed" "$fixture/worker-finished"
+
+resume_finished_output="$(MOCK_MODE=resume_finished PATH="$fixture/bin:$PATH" MOCK_ROOT="$fixture" \
+  "$fixture/ralph.sh" --until-finalized --resume)"
+
+[[ "$resume_finished_output" == *'Ralph finalized DEV-31'* ]] || {
+  printf 'FAIL: Ralph lost --resume after a prior worker finished\n' >&2
+  exit 1
+}
+
+[[ "$(tail -n 1 "$fixture/runner-arguments")" == 'DEV-31 --start --resume' ]] || {
+  printf 'FAIL: Ralph did not retain --resume after a finished prior worker\n' >&2
+  exit 1
+}
 
 set +e
 waiting_output="$(MOCK_MODE=waiting PATH="$fixture/bin:$PATH" MOCK_ROOT="$fixture" \

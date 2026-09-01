@@ -15,6 +15,8 @@ load_dotenv(CREWAI_ROOT / ".env")
 
 
 from .linear_api import complete_issue, get_issue
+from .evidence import validate_reviewer_evidence
+from .integration_env import environment
 from .models import CrewResult
 
 
@@ -36,6 +38,7 @@ def _run(
     command: list[str],
     cwd: Path = PROJECT_ROOT,
     timeout: int = 600,
+    env: dict[str, str] | None = None,
 ) -> str:
     result = subprocess.run(
         command,
@@ -43,6 +46,7 @@ def _run(
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=env,
         check=False,
     )
 
@@ -195,11 +199,16 @@ def _check_crew_result(
             f"Crew no aprobado: {result.status}"
         )
 
+    evidence_error = validate_reviewer_evidence(change_id, result)
+    if evidence_error:
+        raise RuntimeError(f"Evidencia inválida: {evidence_error}")
+
     required = {
         "python": result.verification.python,
         "lint": result.verification.lint,
         "test": result.verification.test,
         "build": result.verification.build,
+        "integration": result.verification.integration,
         "openspec": result.verification.openspec,
     }
 
@@ -258,10 +267,21 @@ def _run_code_gates() -> None:
         ["pnpm", "lint"],
         ["pnpm", "test"],
         ["pnpm", "build"],
+        ["pnpm", "db:start"],
+        [
+            "pnpm",
+            "--filter",
+            "@koty-app/api",
+            "test:integration",
+        ],
     ]:
         _run(
             command,
             cwd=PROJECT_ROOT,
+            env=environment(PROJECT_ROOT)
+            if command[1:] == ["db:start"]
+            or command[-1:] == ["test:integration"]
+            else None,
         )
 
 
@@ -278,6 +298,22 @@ def _commit(
 
     if not status:
         return
+
+    staged = _run(
+        [
+            "git",
+            "diff",
+            "--cached",
+            "--name-only",
+        ]
+    )
+    if any(
+        path.startswith(".agent/")
+        for path in staged.splitlines()
+    ):
+        raise RuntimeError(
+            "Hay artifacts runtime indexados"
+        )
 
     branch = _current_branch()
 
@@ -313,7 +349,10 @@ def _commit(
         [
             "git",
             "add",
-            "-A",
+            "--all",
+            "--",
+            ".",
+            ":(exclude).agent",
         ]
     )
 
@@ -334,36 +373,17 @@ def _write_failure(
     change: Path,
     stage: str,
     error: Exception,
-    retry_with_crew: bool,
 ) -> None:
-    attempts = change / "attempts"
+    diagnostics = change / "finalization"
 
-    attempts.mkdir(
+    diagnostics.mkdir(
         parents=True,
         exist_ok=True,
     )
-
-    if retry_with_crew:
-        existing = list(
-            attempts.glob(
-                "attempt-*.md"
-            )
-        )
-
-        number = len(existing) + 1
-
-        filename = (
-            f"attempt-{number:03}.md"
-        )
-
-    else:
-        timestamp = datetime.now().strftime(
-            "%Y%m%d-%H%M%S"
-        )
-
-        filename = (
-            f"finalizer-{timestamp}.md"
-        )
+    timestamp = datetime.now().strftime(
+        "%Y%m%d-%H%M%S-%f"
+    )
+    filename = f"finalizer-{timestamp}.md"
 
     content = f"""# Finalizer Failure
 
@@ -377,7 +397,7 @@ def _write_failure(
 """
 
     (
-        attempts / filename
+        diagnostics / filename
     ).write_text(
         content,
         encoding="utf-8",
@@ -441,7 +461,7 @@ def finalize(
 
     if result.status != "approved":
         return {
-            "status": "not_ready",
+            "status": "blocked" if result.status == "blocked" else "not_ready",
             "finalized": False,
             "ticket_id": ticket_id,
             "change_id": change_id,
@@ -579,7 +599,6 @@ def finalize(
                 change,
                 stage,
                 error,
-                retry_with_crew,
             )
 
         message = str(error).lower()

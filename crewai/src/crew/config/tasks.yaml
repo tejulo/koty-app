@@ -100,6 +100,16 @@ coding_task:
     Si '{last_attempt_path}' es distinto de 'NONE',
     lee también el fallo anterior y corrige su causa.
 
+    Si '{last_evidence_path}' es distinto de 'NONE',
+    lee también esa evidencia. Si el hash de un archivo
+    diagnosticado ya no coincide, vuelve a ejecutar ese gate antes
+    de editar usando sus líneas o columnas.
+
+    Si '{last_integration_diagnosis_path}' es distinto de 'NONE',
+    lee ese JSON antes de corregir integración. Si category es
+    shared_test_harness, aplica repairHint y solo usa repairScope para
+    infraestructura compartida. No debilites ni saltees pruebas.
+
     No debilites specs o criterios de aceptación para hacer
     desaparecer un fallo.
 
@@ -118,6 +128,7 @@ coding_task:
     - lint
     - test
     - build
+    - integration
 
     Si una verificación falla por la implementación,
     corrige el problema y vuelve a ejecutarla.
@@ -125,7 +136,7 @@ coding_task:
     No archives OpenSpec y no modifiques Linear.
   expected_output: >
     Archivos modificados, tareas completadas y resultado
-    de python, lint, test y build.
+    de python, lint, test, build e integration.
   agent: programer
 
 
@@ -189,6 +200,11 @@ review_task:
     - design respetado;
     - todas las tasks marcadas [x].
 
+    Si '{last_integration_diagnosis_path}' es distinto de 'NONE',
+    lee ese JSON. Para category shared_test_harness, acepta cambios
+    compartidos solo dentro de repairScope y exige que integración
+    vuelva a pasar sin saltear pruebas.
+
     Rechaza como retryable_failure un plan que declare
     fuera de alcance un criterio de aceptación.
 
@@ -197,10 +213,17 @@ review_task:
     - lint
     - test
     - build
+    - integration
 
     Ejecuta:
 
     validate {change_id} --strict --no-interactive
+
+    Después de revisar, ejecuta los seis gates y usa los IDs
+    `Evidence:` devueltos por las herramientas. Incluye en `evidence`
+    los IDs para `python`, `lint`, `test`, `build`, `integration` y `openspec`. El
+    runner asigna el intento. No declares un gate aprobado sin una
+    evidencia aprobada del mismo gate.
 
     Considera también el resultado real del Tester.
 
@@ -229,11 +252,11 @@ review_task:
 
     Devuelve un único objeto JSON sin razonamiento ni markdown.
     verification debe contener exactamente python, lint, test,
-    build, playwright y openspec; cada valor es passed, failed o skipped.
+    build, integration, playwright y openspec; cada valor es passed, failed o skipped.
 
     Nunca archives OpenSpec.
     Nunca modifiques Linear.
   expected_output: >
-    Resultado estructurado con ticket_id, change_id, status,
+    Resultado estructurado con ticket_id, change_id, evidence, status,
     failure_type, failure_stage, summary y verification.
   agent: reviewer

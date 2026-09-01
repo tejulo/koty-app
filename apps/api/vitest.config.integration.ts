@@ -1,8 +1,11 @@
+import 'reflect-metadata';
 import { defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
+import swc from 'unplugin-swc';
 
 export default defineConfig({
   root: fileURLToPath(new URL('./', import.meta.url)),
+  plugins: [swc.vite({ tsconfigFile: './tsconfig.json' })],
   test: {
     environment: 'node',
     include: ['test/integration/**/*.integration.spec.ts'],

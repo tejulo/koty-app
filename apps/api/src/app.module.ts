@@ -8,6 +8,8 @@ import { IdempotencyModule } from './common/idempotency/idempotency.module';
 import { IdempotencyEchoModule } from './idempotency-echo/idempotency-echo.module';
 import { AuditModule } from './audit/audit.module';
 import { AuditEchoModule } from './audit-echo/audit-echo.module';
+import { OutboxModule } from './outbox/outbox.module';
+import { OutboxEchoModule } from './outbox-echo/outbox-echo.module';
 
 const additionalImports = [];
 if (process.env['ENABLE_IDEMPOTENCY_ECHO'] === 'true') {
@@ -16,6 +18,9 @@ if (process.env['ENABLE_IDEMPOTENCY_ECHO'] === 'true') {
 if (process.env['ENABLE_AUDIT_ECHO'] === 'true') {
   additionalImports.push(AuditEchoModule.register());
 }
+if (process.env['ENABLE_OUTBOX_ECHO'] === 'true') {
+  additionalImports.push(OutboxEchoModule.register());
+}
 
 @Module({
   imports: [
@@ -23,6 +28,7 @@ if (process.env['ENABLE_AUDIT_ECHO'] === 'true') {
     PrismaModule,
     IdempotencyModule,
     AuditModule,
+    OutboxModule,
     ...additionalImports,
   ],
   controllers: [AppController],

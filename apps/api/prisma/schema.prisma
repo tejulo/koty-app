@@ -79,3 +79,27 @@ model AuditEvent {
   @@index([action, occurredAt])
   @@index([entityType, entityId, occurredAt])
 }
+
+// DEV-32 — Transactional outbox. OutboxEvent persists a domain event within
+// the same database transaction that mutates the business state. The unique
+// constraint on (organizationId, aggregateType, aggregateId, semanticKey) is
+// the arbitration mechanism for idempotent retries. The matching migration
+// also installs a BEFORE UPDATE OR DELETE trigger and REVOKE so the table is
+// append-only at the database level.
+model OutboxEvent {
+  id             String   @id @default(uuid())
+  organizationId String
+  aggregateType  String
+  aggregateId    String
+  version        Int
+  semanticKey    String
+  eventType      String
+  correlationId  String
+  causationId    String?
+  payload        Json
+  createdAt      DateTime @default(now())
+
+  @@unique([organizationId, aggregateType, aggregateId, semanticKey])
+  @@index([organizationId, createdAt])
+  @@index([aggregateType, aggregateId, version])
+}

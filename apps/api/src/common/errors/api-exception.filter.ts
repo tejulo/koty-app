@@ -55,7 +55,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
           message = 'Validation failed';
           code = ErrorCode.VALIDATION_ERROR;
           codeExplicitlySet = true;
-        } else if (typeof resp.code === 'string') {
+        }
+
+        if (typeof resp.code === 'string') {
           // The exception explicitly carried a pre-resolved ErrorCode (used by
           // IdempotencyKeyReusedException, AuditTransitionConflictException,
           // AuditInvalidFieldException, etc.). Trust it and leave the rest of

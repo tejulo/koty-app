@@ -50,6 +50,8 @@ export async function setup(): Promise<void> {
   process.env['ENABLE_IDEMPOTENCY_ECHO'] = 'true';
   // DEV-36: enable the audit smoke controller for integration tests.
   process.env['ENABLE_AUDIT_ECHO'] = 'true';
+  // DEV-32: enable the outbox smoke controller for integration tests.
+  process.env['ENABLE_OUTBOX_ECHO'] = 'true';
 
   const apply = spawnSync(
     'pnpm',

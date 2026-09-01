@@ -1,0 +1,27 @@
+{
+  "ticket_id": "DEV-32",
+  "change_id": "dev-32",
+  "attempt": 11,
+  "evidence": {
+    "python": "d139d17ba820464a90909c1f855506f1",
+    "lint": "dec4890e96fa48c0b29138edb5a2365d",
+    "test": "054faaf347b4494dab640a96a96edd27",
+    "build": "54650da17f704583b1d0b810ac58e5c2",
+    "integration": "df54dc642ce94fce8f940f7c74539359",
+    "openspec": "7b54a65b9a114c2ebd164b36dcf5de46",
+    "playwright": "not_required_by_design"
+  },
+  "status": "approved",
+  "failure_type": "none",
+  "failure_stage": "none",
+  "summary": "Revisión final del cambio OpenSpec dev-32 (Guardar eventos en un outbox transaccional). Artefactos completos y trazables: proposal.md declara el problema, objetivo, alcance (8 puntos), Fuera de Alcance (no incluye ningún criterio de aceptación del ticket), impacto, riesgos, trazabilidad con CONTEXT.md (Incremento 0, sección 19, BND-IAM-*) y con los CA-1..CA-5; specs/transactional-outbox/spec.md define 9 Requirements verificables con Scenarios GIVEN/WHEN/THEN que cubren RF-1..RF-6 y CA-1..CA-5; design.md presenta 9 decisiones de diseño y declara explícitamente 'Verification Strategy - Browser E2E: not_required' (superficie 100% API HTTP + PostgreSQL, inmutabilidad validada por trigger SQL directo, idempotencia y atomicidad por pruebas de integración contra base aislada, patrón DEV-6/DEV-31/DEV-36); tasks.md tiene todas las tareas marcadas [x] en Fase A (artefactos) y Fase B (implementación), con trazabilidad CA→Requirement→Tarea. Las 6 verificaciones se ejecutan en este intento: python (exit 0, d139d17b), lint (exit 0, dec4890e, 5/5 paquetes), test (exit 0, 054faaf3, 10 archivos / 82 tests passed, incluye outbox.service.spec.ts 10/10 y outbox-canonical-fingerprint.spec.ts 10/10), build (exit 0, 54650da1, pnpm -r build ok), integration (exit 0, df54dc64, 5 archivos / 20 tests passed, incluye outbox.integration.spec.ts 6/6, audit.integration.spec.ts 6/6, idempotency.integration.spec.ts 5/5, decorator-metadata.integration.spec.ts 1/1, prisma-connection.integration.spec.ts 2/2, con migración 20260831022810_add_outbox_event aplicada), openspec validate dev-32 --strict --no-interactive (exit 0, 7b54a65b, 'Change dev-32 is valid'). Browser E2E skipped (design declara not_required, Playwright no aplica). No se han archivado artefactos OpenSpec ni modificado Linear. Cobertura CA-1 (estructura mínima) verificada por test 'persists an OutboxEvent through the echo endpoint'; CA-2 (atomicidad) por 'rolls back the outbox write when the handler forces a failure' (forceRollback=true no deja fila); CA-3 (inmutabilidad) por 'blocks UPDATE attempts' y 'blocks DELETE attempts' (trigger 'OutboxEvent is append-only') + superficie reducida del servicio (no update/delete/patch/truncate); CA-4 (sin llamadas externas) por inspección (OutboxService solo importa Prisma + uuid; no hay SDKs HTTP/RPC/colas) y por unit tests que mockean Prisma y verifican operaciones exclusivamente locales; CA-5 (idempotencia) por @@unique + huella canónica SHA-256 con escenarios 'collapses a retry with the same semanticKey and payload into one row' y 'returns 409 OUTBOX_SEMANTIC_CONFLICT when the payload differs'. El intento previo attempt-010 había clasificado integration como shared_test_harness (vitest esbuild sin emitDecoratorMetadata), pero la causa quedó resuelta en el arnés compartido sin modificar los artefactos OpenSpec ni debilitar specs/pruebas; la verificación integration actual pasa sin saltear pruebas (20/20). El runner asigna el intento; cada gate cuenta con su evidencia aprobada por la herramienta correspondiente, por lo que el estado final es approved.",
+  "verification": {
+    "python": "passed",
+    "lint": "passed",
+    "test": "passed",
+    "build": "passed",
+    "integration": "passed",
+    "playwright": "skipped",
+    "openspec": "passed"
+  }
+}

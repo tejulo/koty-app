@@ -24,4 +24,5 @@ export const swaggerConfig = new DocumentBuilder()
   .setVersion('1.0')
   .addTag('health', 'Health check endpoint')
   .addTag('audit', 'Consulta y registro de auditoría append-only')
+  .addTag('outbox', 'Outbox transaccional append-only (DEV-32)')
   .build();

@@ -1,6 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 import { PrismaService } from './prisma.service';
+
+const DUMMY_DATABASE_URL = 'postgresql://test:test@localhost:5432/test';
 
 const buildService = (): {
   service: PrismaService;
@@ -17,6 +27,34 @@ const buildService = (): {
 
 describe('PrismaService', () => {
   const originalIntegrationFlag = process.env['INTEGRATION_TEST'];
+  const originalDatabaseUrl = process.env['DATABASE_URL'];
+  const originalDatabaseUrlTest = process.env['DATABASE_URL_TEST'];
+
+  beforeAll(() => {
+    // The PrismaService constructor reads `DATABASE_URL` to instantiate
+    // the underlying engine. The unit tests do not need a real database
+    // (they mock `$connect` / `$disconnect`), so a syntactically valid
+    // PostgreSQL URL is enough to let the parent constructor succeed.
+    process.env['DATABASE_URL'] = DUMMY_DATABASE_URL;
+  });
+
+  afterAll(() => {
+    if (originalDatabaseUrl === undefined) {
+      delete process.env['DATABASE_URL'];
+    } else {
+      process.env['DATABASE_URL'] = originalDatabaseUrl;
+    }
+    if (originalDatabaseUrlTest === undefined) {
+      delete process.env['DATABASE_URL_TEST'];
+    } else {
+      process.env['DATABASE_URL_TEST'] = originalDatabaseUrlTest;
+    }
+    if (originalIntegrationFlag === undefined) {
+      delete process.env['INTEGRATION_TEST'];
+    } else {
+      process.env['INTEGRATION_TEST'] = originalIntegrationFlag;
+    }
+  });
 
   beforeEach(() => {
     delete process.env['INTEGRATION_TEST'];

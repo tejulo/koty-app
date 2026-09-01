@@ -20,7 +20,7 @@
     "start:web": "pnpm --filter @koty-app/web start",
     "start:api": "pnpm --filter @koty-app/api start",
     "start:worker": "pnpm --filter @koty-app/worker start",
-    "db:start": "docker compose up -d",
+    "db:start": "docker compose up -d --wait --wait-timeout 60",
     "db:stop": "docker compose down",
     "db:status": "docker compose ps",
     "db:migrate:dev": "pnpm --filter @koty-app/api db:migrate:dev",
