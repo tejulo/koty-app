@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -19,6 +20,7 @@ os.environ["CREWAI_TRACING_ENABLED"] = "false"
 os.environ["OTEL_SDK_DISABLED"] = "true"
 
 MAX_DIAGNOSTIC_REPAIR_ATTEMPTS = 1
+GATE_NAMES = ("python", "lint", "test", "build", "integration", "openspec")
 
 
 from .crew import KotyAppCrew
@@ -28,9 +30,12 @@ from .evidence import (
     save_integration_diagnosis,
     validate_reviewer_evidence,
 )
+from .gates import diagnose_gate_failure, run_gate
 from .models import (
     CrewExecution,
     CrewResult,
+    ReviewVerdict,
+    TesterResult,
     VerificationResult,
 )
 from .tools.custom_tool import (
@@ -354,6 +359,70 @@ def verification_evidence_failure(
     )
 
 
+def gate_failure(
+    ticket_id: str,
+    change_id: str,
+    name: str,
+    evidence_id: str | None,
+    output: str,
+) -> CrewResult:
+    checks = {
+        gate: "skipped"
+        for gate in (
+            "python",
+            "lint",
+            "test",
+            "build",
+            "integration",
+            "playwright",
+            "openspec",
+        )
+    }
+    checks[name] = "failed"
+    return CrewResult(
+        ticket_id=ticket_id,
+        change_id=change_id,
+        evidence={name: evidence_id} if evidence_id else {},
+        status="retryable_failure",
+        failure_type="implementation",
+        failure_stage=f"{name}_preflight",
+        summary=output,
+        verification=VerificationResult(**checks),
+    )
+
+
+def save_repair_diagnosis(
+    change_id: str,
+    attempt: int,
+    diagnosis: dict[str, object],
+) -> str:
+    path = attempts_dir(change_id) / f"attempt-{attempt:03}.repair-diagnosis.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(diagnosis, indent=2), encoding="utf-8")
+    return path.relative_to(PROJECT_ROOT).as_posix()
+
+
+def apply_supervisor_gates(change_id: str, result: CrewResult) -> CrewResult:
+    runs = [run_gate(name, change_id) for name in GATE_NAMES]
+    checks = {run.name: "passed" if run.passed else "failed" for run in runs}
+    result.evidence = {
+        run.name: run.evidence_id
+        for run in runs
+        if run.evidence_id
+    }
+    result.verification = VerificationResult(
+        **checks,
+        playwright=result.verification.playwright,
+    )
+    failed = next((run for run in runs if not run.passed), None)
+    if failed:
+        result.status = "retryable_failure"
+        result.failure_type = "implementation"
+        result.failure_stage = failed.name
+        result.summary = failed.output
+    return result
+
+
 def parse_crew_result(output: object) -> CrewResult:
     pydantic = getattr(output, "pydantic", None)
 
@@ -387,6 +456,73 @@ def parse_crew_result(output: object) -> CrewResult:
     raise RuntimeError(
         "Reviewer no devolvió un resultado estructurado válido"
     )
+
+
+def parse_review_verdict(output: object) -> ReviewVerdict:
+    pydantic = getattr(output, "pydantic", None)
+    if isinstance(pydantic, ReviewVerdict):
+        return pydantic
+    if pydantic is not None:
+        return ReviewVerdict.model_validate(pydantic)
+    raw = getattr(output, "raw", None)
+    if not isinstance(raw, str):
+        raise RuntimeError("Reviewer no devolvió un veredicto estructurado")
+    decoder = json.JSONDecoder()
+    for start, character in enumerate(raw):
+        if character != "{":
+            continue
+        try:
+            payload, _ = decoder.raw_decode(raw[start:])
+            return ReviewVerdict.model_validate(payload)
+        except (json.JSONDecodeError, ValidationError):
+            continue
+    raise RuntimeError("Reviewer no devolvió un veredicto estructurado válido")
+
+
+def result_from_verdict(verdict: ReviewVerdict) -> CrewResult:
+    return CrewResult(
+        ticket_id=verdict.ticket_id,
+        change_id=verdict.change_id,
+        status=verdict.status,
+        failure_type=verdict.failure_type,
+        failure_stage=verdict.failure_stage,
+        summary=verdict.summary,
+        verification=VerificationResult(
+            python="skipped",
+            lint="skipped",
+            test="skipped",
+            build="skipped",
+            integration="skipped",
+            playwright="skipped",
+            openspec="skipped",
+        ),
+    )
+
+
+def apply_tester_result(change_id: str, output: object, result: CrewResult) -> CrewResult:
+    design = PROJECT_ROOT / "openspec" / "changes" / change_id / "design.md"
+    required = design.is_file() and "Browser E2E: required" in design.read_text(
+        encoding="utf-8"
+    )
+    if not required:
+        result.verification.playwright = "skipped"
+        return result
+    tester = next(
+        (
+            task.pydantic
+            for task in getattr(output, "tasks_output", [])
+            if isinstance(getattr(task, "pydantic", None), TesterResult)
+        ),
+        None,
+    )
+    status = tester.status if tester else "failed"
+    result.verification.playwright = status
+    if status != "passed":
+        result.status = "retryable_failure"
+        result.failure_type = "test"
+        result.failure_stage = "playwright"
+        result.summary = tester.summary if tester else "Falta resultado del tester."
+    return result
 
 
 def normalize_crew_result(payload: object) -> object:
@@ -533,27 +669,60 @@ def diagnose_result(
     attempt: int,
     result: CrewResult,
 ) -> tuple[dict[str, object] | None, str | None]:
-    del result
     run = next(
         (
             run
             for run in reversed(
                 load_attempt_evidence(change_id, attempt)["executions"]
             )
-            if run["gate"] == "integration" and run["exitCode"] != 0
+            if run["exitCode"] != 0
         ),
         None,
     )
     if not run:
-        return None, None
+        if result.status != "retryable_failure":
+            return None, None
+        diagnosis = {
+            "category": "reviewer_feedback",
+            "fingerprint": hashlib.sha256(result.summary.encode()).hexdigest(),
+            "repairHint": result.summary,
+            "repairScope": [],
+        }
+        return diagnosis, save_repair_diagnosis(change_id, attempt, diagnosis)
     output_path = PROJECT_ROOT / run["outputPath"]
     if not output_path.is_file():
         return None, None
-    diagnosis = diagnose_integration_failure(
-        output_path.read_text(encoding="utf-8")
-    )
-    path = save_integration_diagnosis(change_id, attempt, diagnosis)
-    return diagnosis, path.relative_to(PROJECT_ROOT).as_posix()
+    output = output_path.read_text(encoding="utf-8")
+    if run["gate"] == "integration":
+        diagnosis = diagnose_integration_failure(output)
+        path = save_integration_diagnosis(change_id, attempt, diagnosis)
+        relative_path = path.relative_to(PROJECT_ROOT).as_posix()
+    else:
+        diagnosis = diagnose_gate_failure(run["gate"], output)
+        relative_path = save_repair_diagnosis(change_id, attempt, diagnosis)
+        path = PROJECT_ROOT / relative_path
+    diagnosis["evidence"] = {
+        "id": run["id"],
+        "gate": run["gate"],
+        "outputPath": run["outputPath"],
+    }
+    path.write_text(json.dumps(diagnosis, indent=2), encoding="utf-8")
+    return diagnosis, relative_path
+
+
+def repair_scope(path: str | None, change_id: str) -> str | None:
+    if not path:
+        return None
+    diagnosis_path = PROJECT_ROOT / path
+    if not diagnosis_path.is_file():
+        return None
+    diagnosis = json.loads(diagnosis_path.read_text(encoding="utf-8"))
+    scope = diagnosis.get("repairScope")
+    if not isinstance(scope, list) or not all(isinstance(item, str) for item in scope):
+        return None
+    if not scope:
+        return None
+    return json.dumps([item.replace("<change>", change_id) for item in scope])
 
 
 def run():
@@ -620,6 +789,7 @@ def run():
             "CREW_VERIFICATION_CHANGE_ID",
             "CREW_VERIFICATION_ATTEMPT",
             "CREW_TICKET_ID",
+            "CREW_REPAIR_SCOPE",
         )
     }
 
@@ -627,20 +797,40 @@ def run():
         os.environ["CREW_VERIFICATION_CHANGE_ID"] = change_id
         os.environ["CREW_VERIFICATION_ATTEMPT"] = str(record_attempt)
         os.environ["CREW_TICKET_ID"] = ticket_id
-        output = KotyAppCrew().crew().kickoff(
-            inputs={
-                "ticket_id": ticket_id,
-                "change_id": change_id,
-                "attempt": record_attempt,
-                "last_attempt_path": last_attempt(change_id),
-                "last_evidence_path": last_evidence_path(change_id),
-                "last_integration_diagnosis_path": (
-                    previous_diagnosis_path or "NONE"
-                ),
-            }
-        )
-
-        result = parse_crew_result(output)
+        scope = repair_scope(previous_diagnosis_path, change_id)
+        if scope is None:
+            os.environ.pop("CREW_REPAIR_SCOPE", None)
+        else:
+            os.environ["CREW_REPAIR_SCOPE"] = scope
+        inputs = {
+            "ticket_id": ticket_id,
+            "change_id": change_id,
+            "attempt": record_attempt,
+            "last_attempt_path": last_attempt(change_id),
+            "last_evidence_path": last_evidence_path(change_id),
+            "last_repair_diagnosis_path": previous_diagnosis_path or "NONE",
+        }
+        crew = KotyAppCrew()
+        supervised = hasattr(crew, "planning_crew")
+        if supervised:
+            crew.planning_crew().kickoff(inputs=inputs)
+            preflight = run_gate("openspec", change_id)
+            if not preflight.passed:
+                result = gate_failure(
+                    ticket_id,
+                    change_id,
+                    "openspec",
+                    preflight.evidence_id,
+                    preflight.output,
+                )
+            else:
+                output = crew.delivery_crew().kickoff(inputs=inputs)
+                result = result_from_verdict(parse_review_verdict(output))
+                result = apply_tester_result(change_id, output, result)
+                result = apply_supervisor_gates(change_id, result)
+        else:
+            output = crew.crew().kickoff(inputs=inputs)
+            result = parse_crew_result(output)
         result.attempt = record_attempt
 
         if (
@@ -658,19 +848,20 @@ def run():
                 "a otro change_id"
             )
 
-        evidence_error = validate_reviewer_evidence(
-            change_id,
-            result,
-            record_attempt,
-        )
-        if evidence_error:
-            result = verification_evidence_failure(
-                ticket_id,
+        if not supervised and result.status != "retryable_failure":
+            evidence_error = validate_reviewer_evidence(
                 change_id,
-                record_attempt,
-                evidence_error,
                 result,
+                record_attempt,
             )
+            if evidence_error:
+                result = verification_evidence_failure(
+                    ticket_id,
+                    change_id,
+                    record_attempt,
+                    evidence_error,
+                    result,
+                )
 
     except Exception as error:
         traceback.print_exc()
@@ -689,11 +880,23 @@ def run():
         close_playwright_session()
         close_local_environment()
 
-    diagnosis, diagnosis_path = diagnose_result(
-        change_id,
-        record_attempt,
-        result,
-    )
+    if result.failure_stage == "openspec_preflight":
+        diagnosis = diagnose_gate_failure("openspec", result.summary)
+        diagnosis["evidence"] = {
+            "id": result.evidence.get("openspec"),
+            "gate": "openspec",
+        }
+        diagnosis_path = save_repair_diagnosis(
+            change_id,
+            record_attempt,
+            diagnosis,
+        )
+    else:
+        diagnosis, diagnosis_path = diagnose_result(
+            change_id,
+            record_attempt,
+            result,
+        )
     execution.last_diagnosis_path = None
 
     save_result(
@@ -707,7 +910,7 @@ def run():
             result,
             diagnosis,
         )
-        if granted_repair_credit:
+        if diagnosis_path:
             execution.last_diagnosis_path = diagnosis_path
         save_execution(change_id, execution)
         save_attempt(

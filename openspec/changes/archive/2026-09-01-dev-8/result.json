@@ -1,0 +1,26 @@
+{
+  "ticket_id": "dev-8",
+  "change_id": "dev-8",
+  "attempt": 4,
+  "evidence": {
+    "python": "a13635546fb144a1b139ace347481aab",
+    "lint": "5ddd23bde3e648539b850edb99c5847f",
+    "test": "3b4235d9e4184c9294d5d0802658f9df",
+    "build": "a0457e6417d34bb7aff7db7a5b1be129",
+    "integration": "6abe297625de4758b713a0602df2fcf5",
+    "openspec": "1ffc58a0ed6d4874b25c633aa1b30d42"
+  },
+  "status": "approved",
+  "failure_type": "none",
+  "failure_stage": null,
+  "summary": "DEV-8 cumple todos los criterios. proposal.md, design.md y tasks.md están completos y alineados; el spec incluye los 5 ADDED Requirements con sus Scenarios (CA-1 a CA-5), todos cubiertos por tasks [x]. El repair diagnosis de attempt-003 (openspec_delta_missing) ya fue corregido añadiendo el header '## ADDED Requirements' en specs/quality-automation/spec.md, dentro del repairScope declarado; el gate openspec vuelve a pasar (exit 0). Los seis gates exigidos pasan en verde contra el árbol actual: python (e19687c788294a96bfc693a8277e6726), lint (940c356054234749939f4892855b5a96), test 82 tests (fcd13bdbd7ad466698e1e708324b51ad), build (78b4f625c7d141f49e069721976547bc), integration 20 tests sobre base aislada plandepo_test_<runId> con las 4 migraciones aplicadas (3cec692f502040ffac2ff1c6b61adc93), openspec strict --no-interactive (4dbcc0e11d284dce91a431117a5082c9). Browser E2E es not_required por design.md (DEV-8 automatiza controles backend/CLI/DB sin superficie de navegador), por lo que Playwright skipped es aceptable. package.json raíz contiene format/format:check/lint/typecheck/test/test:integration/build/verify/test:shell/crew:check/db:* con cortocircuito && fail-fast; .gitignore excluye .env, .env.local, .env.*.local (con !.env.example), .venv/, node_modules/, dist/, build/, coverage/, .worktrees/, .agent/crew/logs/history/tasks.json, ralph-sbx.sh, crewai/.env y mantiene versionados pnpm-lock.yaml y crewai/uv.lock. Aprobado para archivado.",
+  "verification": {
+    "python": "passed",
+    "lint": "passed",
+    "test": "passed",
+    "build": "passed",
+    "integration": "passed",
+    "playwright": "skipped",
+    "openspec": "passed"
+  }
+}

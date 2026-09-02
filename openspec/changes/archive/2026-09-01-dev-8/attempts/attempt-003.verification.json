@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "attempt": 3,
+  "executions": [
+    {
+      "id": "77f74a17a6e945569095886e3f39a986",
+      "gate": "openspec",
+      "command": [
+        "pnpm",
+        "exec",
+        "openspec",
+        "validate",
+        "dev-8",
+        "--strict",
+        "--no-interactive"
+      ],
+      "cwd": ".",
+      "exitCode": 1,
+      "createdAt": "2026-09-01T23:43:48.815928+00:00",
+      "outputPath": "openspec/changes/dev-8/attempts/attempt-003.verification.77f74a17a6e945569095886e3f39a986.log",
+      "outputSha256": "898fd6d96af04a15931464e81c2f699ab002e2fbf097af1c7fc395275d61b001",
+      "diagnostics": []
+    }
+  ]
+}

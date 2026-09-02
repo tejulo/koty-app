@@ -342,7 +342,7 @@ chmod +x "$portable_hash_bin/shasum"
 [[ "$(PATH="$portable_hash_bin" sha256_file "$BOOTSTRAP_SOURCE")" == "portable-shasum" ]] || fail "sha256_file did not fall back to shasum"
 
 assert_output_contains "$REPO_ROOT/package.json" '"test:shell": "node scripts/tests/run-bootstrap-tests.mjs"'
-assert_output_contains "$REPO_ROOT/package.json" '"verify": "pnpm lint && pnpm test && pnpm test:shell && pnpm build && pnpm crew:check"'
+assert_output_contains "$REPO_ROOT/package.json" '"verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:shell && pnpm build && pnpm crew:check"'
 assert_output_contains "$REPO_ROOT/package.json" '"crew:check": "uv run --project crewai pytest crewai/tests -v && OPENSPEC_TELEMETRY=0 pnpm exec openspec validate --all --strict"'
 assert_output_contains "$REPO_ROOT/scripts/tests/run-bootstrap-tests.mjs" "process.platform === 'win32'"
 assert_output_contains "$REPO_ROOT/scripts/tests/run-bootstrap-tests.mjs" 'powershell.exe'

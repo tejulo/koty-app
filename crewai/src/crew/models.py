@@ -22,6 +22,23 @@ class VerificationResult(BaseModel):
     openspec: Check
 
 
+class ReviewVerdict(BaseModel):
+    ticket_id: str
+    change_id: str
+    status: Literal["approved", "retryable_failure", "blocked"]
+    failure_type: Literal[
+        "none",
+        "implementation",
+        "test",
+        "infrastructure",
+        "configuration",
+        "requirements",
+        "max_attempts",
+    ] = "none"
+    failure_stage: str | None = None
+    summary: str
+
+
 class CrewResult(BaseModel):
     ticket_id: str
     change_id: str

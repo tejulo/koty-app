@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import crew.tools.custom_tool as tools_module
@@ -69,6 +70,21 @@ def test_ejecutar_openspec_runs_allowed_validation(monkeypatch):
         "--strict",
         "--no-interactive",
     ]
+
+
+def test_escribir_archivo_raiz_rejects_writes_outside_repair_scope(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(tools_module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setenv(
+        "CREW_REPAIR_SCOPE",
+        json.dumps(["openspec/changes/dev-6/specs"]),
+    )
+
+    result = tools_module.escribir_archivo_raiz.func("apps/api/src/app.ts", "blocked")
+
+    assert result == "Error: ruta fuera del repairScope"
+    assert not (tmp_path / "apps" / "api" / "src" / "app.ts").exists()
 
 
 def test_ejecutar_verificacion_dispatches_known_check(monkeypatch):

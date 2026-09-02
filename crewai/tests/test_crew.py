@@ -1,4 +1,5 @@
 from crew.crew import KotyAppCrew
+from crew.models import ReviewVerdict
 from crewai.tools.tool_failure import ToolFailurePolicy
 
 
@@ -13,7 +14,7 @@ def test_analyst_solo_recibe_tools_linear_de_inicio(monkeypatch):
     }
 
 
-def test_reviewer_recibe_verificaciones_sin_mutar_linear(monkeypatch):
+def test_reviewer_no_recibe_gates_autoritativas(monkeypatch):
     monkeypatch.setenv("OPENCODE_API_KEY", "test")
     monkeypatch.setenv("ZEN_REVIEWER_MODEL", "openai/gpt-4o-mini")
 
@@ -21,26 +22,26 @@ def test_reviewer_recibe_verificaciones_sin_mutar_linear(monkeypatch):
 
     tool_names = {tool.name for tool in agent.tools}
 
-    assert "Ejecutar Verificacion" in tool_names
-    assert "Ejecutar OpenSpec" in tool_names
+    assert "Ejecutar Verificacion" not in tool_names
+    assert "Ejecutar OpenSpec" not in tool_names
     assert "Buscar Tarea en Linear" not in tool_names
 
 
-def test_review_task_preserves_reviewer_json_for_runner_validation(monkeypatch):
+def test_review_task_returns_a_qualitative_verdict(monkeypatch):
     monkeypatch.setenv("OPENCODE_API_KEY", "test")
     monkeypatch.setenv("ZEN_REVIEWER_MODEL", "openai/gpt-4o-mini")
 
-    assert KotyAppCrew().review_task().output_pydantic is None
+    assert KotyAppCrew().review_task().output_pydantic is ReviewVerdict
 
 
-def test_review_task_assigns_attempt_to_runner(monkeypatch):
+def test_review_task_does_not_request_gate_evidence(monkeypatch):
     monkeypatch.setenv("OPENCODE_API_KEY", "test")
     monkeypatch.setenv("ZEN_REVIEWER_MODEL", "openai/gpt-4o-mini")
 
     description = KotyAppCrew().review_task().description
 
-    assert "runner asigna el intento" in description
-    assert "Resultado estructurado con ticket_id, change_id, evidence" in (
+    assert "Evidence:" not in description
+    assert "Resultado estructurado con ticket_id, change_id, status" in (
         KotyAppCrew().review_task().expected_output
     )
 
@@ -99,8 +100,8 @@ def test_coder_and_reviewer_receive_shared_integration_repair_policy(
     monkeypatch.setenv("ZEN_REVIEWER_MODEL", "openai/gpt-4o-mini")
     crew = KotyAppCrew()
 
-    assert "{last_integration_diagnosis_path}" in crew.coding_task().description
-    assert "shared_test_harness" in crew.coding_task().description
+    assert "{last_repair_diagnosis_path}" in crew.coding_task().description
+    assert "repairScope" in crew.coding_task().description
     assert "repairScope" in crew.review_task().description
 
 
@@ -114,3 +115,23 @@ def test_crew_writes_task_output_to_configured_log(monkeypatch):
     crew = KotyAppCrew().crew()
 
     assert crew.output_log_file == "/tmp/crew.log"
+
+
+def test_crews_split_planning_from_delivery(monkeypatch):
+    monkeypatch.setenv("OPENCODE_API_KEY", "test")
+    monkeypatch.setenv("ZEN_ANALYST_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("ZEN_ARCHITECT_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("ZEN_CODER_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("ZEN_REVIEWER_MODEL", "openai/gpt-4o-mini")
+
+    crew = KotyAppCrew()
+
+    assert [task.name for task in crew.planning_crew().tasks] == [
+        "analysis_task",
+        "architecture_task",
+    ]
+    assert [task.name for task in crew.delivery_crew().tasks] == [
+        "coding_task",
+        "testing_task",
+        "review_task",
+    ]
