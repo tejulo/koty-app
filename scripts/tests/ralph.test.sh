@@ -174,6 +174,32 @@ resume_finished_output="$(MOCK_MODE=resume_finished PATH="$fixture/bin:$PATH" MO
   exit 1
 }
 
+rm -f "$fixture/finalized" "$fixture/resumed" "$fixture/worker-finished"
+
+replan_output="$(PATH="$fixture/bin:$PATH" MOCK_ROOT="$fixture" \
+  "$fixture/ralph.sh" --until-finalized --replan)"
+
+[[ "$replan_output" == *'Ralph finalized DEV-31'* ]] || {
+  printf 'FAIL: Ralph did not replan the ticket\n' >&2
+  exit 1
+}
+
+[[ "$(tail -n 1 "$fixture/runner-arguments")" == 'DEV-31 --start --replan' ]] || {
+  printf 'FAIL: Ralph did not pass --replan to the worker\n' >&2
+  exit 1
+}
+
+set +e
+PATH="$fixture/bin:$PATH" MOCK_ROOT="$fixture" \
+  "$fixture/ralph.sh" --until-finalized --resume --replan >/dev/null 2>&1
+conflicting_modes_exit=$?
+set -e
+
+[[ "$conflicting_modes_exit" != 0 ]] || {
+  printf 'FAIL: Ralph accepted --resume with --replan\n' >&2
+  exit 1
+}
+
 set +e
 waiting_output="$(MOCK_MODE=waiting PATH="$fixture/bin:$PATH" MOCK_ROOT="$fixture" \
   timeout 1 "$fixture/ralph.sh" --until-finalized -n 10)"

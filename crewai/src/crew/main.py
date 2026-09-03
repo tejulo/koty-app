@@ -3,927 +3,790 @@ import json
 import os
 import re
 import subprocess
-import sys
-import traceback
+import argparse
 from pathlib import Path
+from typing import TypeVar
 
 from dotenv import load_dotenv
-from pydantic import ValidationError
+from pydantic import BaseModel
+
+from .crew import KotyAppCrew
+from .evidence import diagnose_integration_failure
+from .gates import GateRun, diagnose_gate_failure, run_gate
+from .linear_api import get_issue
+from .models import (
+    ExecutionState,
+    CrewResult,
+    PlanManifest,
+    RepairPack,
+    ReviewPack,
+    ReviewVerdict,
+    TaskCompletion,
+    TesterResult,
+    TicketContract,
+    VerificationResult,
+)
+from .tools.custom_tool import close_local_environment, close_playwright_session
+from . import workflow
 
 
 CREWAI_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = CREWAI_ROOT.parent
-
 load_dotenv(CREWAI_ROOT / ".env")
-
 os.environ["CREWAI_TRACING_ENABLED"] = "false"
 os.environ["OTEL_SDK_DISABLED"] = "true"
 
-MAX_DIAGNOSTIC_REPAIR_ATTEMPTS = 1
-GATE_NAMES = ("python", "lint", "test", "build", "integration", "openspec")
-
-
-from .crew import KotyAppCrew
-from .evidence import (
-    diagnose_integration_failure,
-    load_attempt_evidence,
-    save_integration_diagnosis,
-    validate_reviewer_evidence,
-)
-from .gates import diagnose_gate_failure, run_gate
-from .models import (
-    CrewExecution,
-    CrewResult,
-    ReviewVerdict,
-    TesterResult,
-    VerificationResult,
-)
-from .tools.custom_tool import (
-    close_local_environment,
-    close_playwright_session,
-)
-
-
-class ArchivedChangeError(RuntimeError):
-    pass
+ROLE_LIMITS = {
+    "analyst": ("ZEN_ANALYST_MODEL", "ZEN_ANALYST_MAX_TOKENS", 4, 800),
+    "architect": ("ZEN_ARCHITECT_MODEL", "ZEN_ARCHITECT_MAX_TOKENS", 12, 1200),
+    "programmer": ("ZEN_CODER_MODEL", "ZEN_CODER_MAX_TOKENS", 20, 2500),
+    "tester": ("ZEN_TESTER_MODEL", "ZEN_TESTER_MAX_TOKENS", 8, 600),
+    "reviewer": ("ZEN_REVIEWER_MODEL", "ZEN_REVIEWER_MAX_TOKENS", 8, 800),
+}
+ROLE_CREWS = {
+    "analyst": "analyst_crew",
+    "architect": "architect_crew",
+    "programmer": "programmer_crew",
+    "tester": "tester_crew",
+    "reviewer": "reviewer_crew",
+}
+PROFILE_PATTERN = re.compile(r"^verification_profile:\s*(\S+)\s*$", re.MULTILINE)
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 def normalize(raw_id: str) -> tuple[str, str]:
     raw_id = raw_id.strip()
-
-    if not re.fullmatch(
-        r"[A-Za-z][A-Za-z0-9]*-\d+",
-        raw_id,
-    ):
-        raise ValueError(
-            "Ticket inválido. Ejemplo: DEV-5"
-        )
-
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*-\d+", raw_id):
+        raise ValueError("Ticket inválido. Ejemplo: DEV-40")
     return raw_id.upper(), raw_id.lower()
 
 
 def active_change(change_id: str) -> Path:
-    return (
-        PROJECT_ROOT
-        / "openspec"
-        / "changes"
-        / change_id
-    )
-
-
-def archived_change(
-    change_id: str,
-) -> Path | None:
-    archive = (
-        PROJECT_ROOT
-        / "openspec"
-        / "changes"
-        / "archive"
-    )
-
-    if not archive.exists():
-        return None
-
-    matches = sorted(
-        archive.glob(f"*-{change_id}"),
-        reverse=True,
-    )
-
-    return matches[0] if matches else None
+    return workflow.PROJECT_ROOT / "openspec" / "changes" / change_id
 
 
 def ensure_change(change_id: str) -> None:
-    if active_change(change_id).exists():
+    if active_change(change_id).is_dir():
         return
-
-    if archived_change(change_id):
-        raise ArchivedChangeError(
-            f"{change_id} ya está archivado"
-        )
-
     result = subprocess.run(
-        [
-            "pnpm",
-            "exec",
-            "openspec",
-            "new",
-            "change",
-            change_id,
-        ],
-        cwd=PROJECT_ROOT,
+        ["pnpm", "exec", "openspec", "new", "change", change_id],
+        cwd=workflow.PROJECT_ROOT,
         capture_output=True,
         text=True,
         check=False,
     )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip())
 
-    if result.returncode != 0:
-        raise RuntimeError(
-            result.stderr.strip()
-            or result.stdout.strip()
-            or "No se pudo crear el cambio OpenSpec"
-        )
 
+def current_ticket_sha256(ticket_id: str) -> str:
+    payload = json.dumps(get_issue(ticket_id), ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()
 
-def attempts_dir(change_id: str) -> Path:
-    return (
-        active_change(change_id)
-        / "attempts"
-    )
 
+def kickoff_role(role: str, *, inputs: dict[str, str]) -> object:
+    crew_factory = getattr(KotyAppCrew(), ROLE_CREWS[role])
+    return crew_factory().kickoff(inputs=inputs)
 
-def execution_path(change_id: str) -> Path:
-    return (
-        PROJECT_ROOT
-        / ".agent"
-        / "crew"
-        / change_id
-        / "execution.json"
-    )
 
-
-def load_execution(change_id: str) -> CrewExecution:
-    path = execution_path(change_id)
-
-    if not path.exists():
-        return CrewExecution()
-
-    return CrewExecution.model_validate_json(
-        path.read_text(encoding="utf-8")
-    )
-
-
-def save_execution(
-    change_id: str,
-    execution: CrewExecution,
-) -> None:
-    path = execution_path(change_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        execution.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
-
-
-def resume_execution(change_id: str) -> CrewExecution:
-    path = execution_path(change_id)
-    execution = (
-        CrewExecution(number=load_execution(change_id).number + 1)
-        if path.exists()
-        else CrewExecution()
-    )
-    save_execution(change_id, execution)
-    return execution
+def _run_gate(name: str, change_id: str) -> GateRun:
+    return run_gate(name, change_id)
 
 
-def attempt_files(
-    change_id: str,
-) -> list[Path]:
-    path = attempts_dir(change_id)
+def run_base_gates(_ticket_id: str, change_id: str) -> list[GateRun]:
+    return [_run_gate(name, change_id) for name in workflow.BASE_GATES]
 
-    if not path.exists():
-        return []
 
-    return sorted(
-        path.glob("attempt-*.md")
-    )
+def _project_path(reference: str) -> Path:
+    candidate = Path(reference)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError("Persisted path is outside the project")
+    path = (workflow.PROJECT_ROOT / candidate).resolve()
+    if not path.is_relative_to(workflow.PROJECT_ROOT.resolve()):
+        raise ValueError("Persisted path is outside the project")
+    return path
 
 
-def next_attempt(change_id: str) -> int:
-    return len(
-        attempt_files(change_id)
-    ) + 1
+def _relative(path: Path) -> str:
+    return path.resolve().relative_to(workflow.PROJECT_ROOT.resolve()).as_posix()
 
 
-def reserve_attempt(
-    change_id: str,
-    execution: CrewExecution,
-) -> int:
-    execution.last_attempt = max(
-        execution.last_attempt,
-        next_attempt(change_id) - 1,
-    ) + 1
-    save_execution(change_id, execution)
-    return execution.last_attempt
+def _attempt(state: ExecutionState) -> int:
+    if state.last_attempt == 0:
+        state.last_attempt = 1
+    return state.last_attempt
 
 
-def last_attempt(change_id: str) -> str:
-    attempts = attempt_files(change_id)
-
-    if not attempts:
-        return "NONE"
-
-    return (
-        attempts[-1]
-        .relative_to(PROJECT_ROOT)
-        .as_posix()
-    )
-
-
-def last_evidence_path(change_id: str) -> str:
-    attempts = attempt_files(change_id)
-    if not attempts:
-        return "NONE"
-    path = attempts[-1].with_suffix("").with_suffix(".verification.json")
-    return path.relative_to(PROJECT_ROOT).as_posix() if path.exists() else "NONE"
-
-
-def save_result(
-    change_id: str,
-    result: CrewResult,
-) -> None:
-    path = active_change(change_id)
-
-    if not path.exists():
-        raise RuntimeError(
-            "No existe el cambio OpenSpec activo"
-        )
-
-    result_path = path / "result.json"
-    temporary_path = result_path.with_suffix(".json.tmp")
-    temporary_path.write_text(
-        result.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
-    os.replace(temporary_path, result_path)
-
-
-def save_attempt(
-    change_id: str,
-    attempt: int,
-    result: CrewResult,
-) -> None:
-    path = attempts_dir(change_id)
-
-    path.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    verification = json.dumps(
-        result.verification.model_dump(),
-        indent=2,
-        ensure_ascii=False,
-    )
-
-    content = f"""# Attempt {attempt}
-
-## Status
-
-{result.status}
-
-## Failure
-
-- Type: {result.failure_type}
-- Stage: {result.failure_stage or "unknown"}
-
-## Summary
-
-{result.summary}
-
-## Verification
-
-~~~json
-{verification}
-~~~
-"""
-
-    (
-        path
-        / f"attempt-{attempt:03}.md"
-    ).write_text(
-        content,
-        encoding="utf-8",
-    )
-
-
-def runtime_failure(
-    ticket_id: str,
-    change_id: str,
-    error: Exception,
-) -> CrewResult:
-    message = str(error)
-
-    configuration_error = any(
-        marker in message.lower()
-        for marker in [
-            "falta ",
-            "not found",
-            "no está instalado",
-        ]
-    )
-
-    return CrewResult(
-        ticket_id=ticket_id,
-        change_id=change_id,
-        status=(
-            "blocked"
-            if configuration_error
-            else "retryable_failure"
-        ),
-        failure_type=(
-            "configuration"
-            if configuration_error
-            else "infrastructure"
-        ),
-        failure_stage="runtime",
-        summary=message,
-        verification=VerificationResult(
-            python="skipped",
-            lint="skipped",
-            test="skipped",
-            build="skipped",
-            integration="skipped",
-            playwright="skipped",
-            openspec="skipped",
-        ),
-    )
-
-
-def verification_evidence_failure(
-    ticket_id: str,
-    change_id: str,
-    attempt: int,
-    reason: str,
-    result: CrewResult,
-) -> CrewResult:
-    return CrewResult(
-        ticket_id=ticket_id,
-        change_id=change_id,
-        attempt=attempt,
-        evidence=result.evidence,
-        status="blocked",
-        failure_type="configuration",
-        failure_stage="verification_evidence",
-        summary=reason,
-        verification=result.verification,
-    )
-
-
-def gate_failure(
-    ticket_id: str,
-    change_id: str,
-    name: str,
-    evidence_id: str | None,
-    output: str,
-) -> CrewResult:
-    checks = {
-        gate: "skipped"
-        for gate in (
-            "python",
-            "lint",
-            "test",
-            "build",
-            "integration",
-            "playwright",
-            "openspec",
-        )
-    }
-    checks[name] = "failed"
-    return CrewResult(
-        ticket_id=ticket_id,
-        change_id=change_id,
-        evidence={name: evidence_id} if evidence_id else {},
-        status="retryable_failure",
-        failure_type="implementation",
-        failure_stage=f"{name}_preflight",
-        summary=output,
-        verification=VerificationResult(**checks),
-    )
-
-
-def save_repair_diagnosis(
-    change_id: str,
-    attempt: int,
-    diagnosis: dict[str, object],
-) -> str:
-    path = attempts_dir(change_id) / f"attempt-{attempt:03}.repair-diagnosis.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(diagnosis, indent=2), encoding="utf-8")
-    return path.relative_to(PROJECT_ROOT).as_posix()
-
-
-def apply_supervisor_gates(change_id: str, result: CrewResult) -> CrewResult:
-    runs = [run_gate(name, change_id) for name in GATE_NAMES]
-    checks = {run.name: "passed" if run.passed else "failed" for run in runs}
-    result.evidence = {
-        run.name: run.evidence_id
-        for run in runs
-        if run.evidence_id
-    }
-    result.verification = VerificationResult(
-        **checks,
-        playwright=result.verification.playwright,
-    )
-    failed = next((run for run in runs if not run.passed), None)
-    if failed:
-        result.status = "retryable_failure"
-        result.failure_type = "implementation"
-        result.failure_stage = failed.name
-        result.summary = failed.output
-    return result
-
-
-def parse_crew_result(output: object) -> CrewResult:
-    pydantic = getattr(output, "pydantic", None)
-
-    if isinstance(pydantic, CrewResult):
-        return pydantic
-
-    if pydantic is not None:
-        return CrewResult.model_validate(pydantic)
-
-    raw = getattr(output, "raw", None)
-
-    if not isinstance(raw, str):
-        raise RuntimeError(
-            "Reviewer no devolvió un resultado estructurado"
-        )
-
-    decoder = json.JSONDecoder()
-
-    for start, character in enumerate(raw):
-        if character != "{":
-            continue
-
-        try:
-            payload, _ = decoder.raw_decode(raw[start:])
-            return CrewResult.model_validate(
-                normalize_crew_result(payload)
-            )
-        except (json.JSONDecodeError, ValidationError):
-            continue
-
-    raise RuntimeError(
-        "Reviewer no devolvió un resultado estructurado válido"
-    )
-
-
-def parse_review_verdict(output: object) -> ReviewVerdict:
-    pydantic = getattr(output, "pydantic", None)
-    if isinstance(pydantic, ReviewVerdict):
-        return pydantic
-    if pydantic is not None:
-        return ReviewVerdict.model_validate(pydantic)
-    raw = getattr(output, "raw", None)
-    if not isinstance(raw, str):
-        raise RuntimeError("Reviewer no devolvió un veredicto estructurado")
-    decoder = json.JSONDecoder()
-    for start, character in enumerate(raw):
-        if character != "{":
-            continue
-        try:
-            payload, _ = decoder.raw_decode(raw[start:])
-            return ReviewVerdict.model_validate(payload)
-        except (json.JSONDecodeError, ValidationError):
-            continue
-    raise RuntimeError("Reviewer no devolvió un veredicto estructurado válido")
-
-
-def result_from_verdict(verdict: ReviewVerdict) -> CrewResult:
-    return CrewResult(
-        ticket_id=verdict.ticket_id,
-        change_id=verdict.change_id,
-        status=verdict.status,
-        failure_type=verdict.failure_type,
-        failure_stage=verdict.failure_stage,
-        summary=verdict.summary,
-        verification=VerificationResult(
-            python="skipped",
-            lint="skipped",
-            test="skipped",
-            build="skipped",
-            integration="skipped",
-            playwright="skipped",
-            openspec="skipped",
-        ),
-    )
-
-
-def apply_tester_result(change_id: str, output: object, result: CrewResult) -> CrewResult:
-    design = PROJECT_ROOT / "openspec" / "changes" / change_id / "design.md"
-    required = design.is_file() and "Browser E2E: required" in design.read_text(
-        encoding="utf-8"
-    )
-    if not required:
-        result.verification.playwright = "skipped"
-        return result
-    tester = next(
-        (
-            task.pydantic
-            for task in getattr(output, "tasks_output", [])
-            if isinstance(getattr(task, "pydantic", None), TesterResult)
-        ),
-        None,
-    )
-    status = tester.status if tester else "failed"
-    result.verification.playwright = status
-    if status != "passed":
-        result.status = "retryable_failure"
-        result.failure_type = "test"
-        result.failure_stage = "playwright"
-        result.summary = tester.summary if tester else "Falta resultado del tester."
-    return result
-
-
-def normalize_crew_result(payload: object) -> object:
-    if not isinstance(payload, dict):
-        return payload
-
-    verification = payload.get("verification")
-
-    if not isinstance(verification, dict):
-        return payload
-
-    checks = {
-        name: normalize_check(
-            verification.get(name)
-            if name != "openspec"
-            else verification.get(
-                "openspec",
-                verification.get(
-                    "openspec_validate",
-                    verification.get("openspec_validate_strict"),
-                ),
-            )
-        )
-        for name in (
-            "python",
-            "lint",
-            "test",
-            "build",
-            "integration",
-            "playwright",
-            "openspec",
-        )
-    }
-
-    return {**payload, "verification": checks}
-
-
-def normalize_check(value: object) -> object:
-    if isinstance(value, dict):
-        value = value.get("result")
-
-    if not isinstance(value, str):
+def _selected_profile(change_id: str) -> str:
+    design = active_change(change_id) / "design.md"
+    match = PROFILE_PATTERN.search(design.read_text(encoding="utf-8")) if design.is_file() else None
+    if not match or match.group(1) not in {"standard", "browser", "operational", "browser_operational"}:
+        raise ValueError("OpenSpec design has no valid verification_profile")
+    return match.group(1)
+
+
+def _as_model(output: object, model_type: type[ModelT]) -> ModelT:
+    value = getattr(output, "pydantic", None)
+    if isinstance(value, model_type):
         return value
-
-    value = value.casefold()
-
-    if value.startswith("pass"):
-        return "passed"
-
-    if value.startswith("fail"):
-        return "failed"
-
-    if value.startswith(("skip", "not_required")):
-        return "skipped"
-
-    return value
+    if value is not None:
+        return model_type.model_validate(value)
+    raise ValueError(f"Role did not return {model_type.__name__}")
 
 
-def max_attempts_result(
-    ticket_id: str,
-    change_id: str,
-    max_attempts: int,
-    execution: CrewExecution,
-) -> CrewResult:
-    return CrewResult(
-        ticket_id=ticket_id,
-        change_id=change_id,
-        status="blocked",
-        failure_type="max_attempts",
-        failure_stage="orchestrator",
-        summary=(
-            f"Se alcanzaron {max_attempts} "
-            f"intentos en la ejecución {execution.number} "
-            "sin completar el ticket."
-        ),
-        verification=VerificationResult(
-            python="skipped",
-            lint="skipped",
-            test="skipped",
-            build="skipped",
-            integration="skipped",
-            playwright="skipped",
-            openspec="skipped",
-        ),
-    )
+def _serializable(value: object) -> object:
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    return json.loads(json.dumps(value, default=str))
 
 
-def execution_attempts(
-    execution: CrewExecution,
-) -> tuple[int, int]:
-    if execution.last_failure_type == "infrastructure":
-        return (
-            execution.infrastructure_attempts,
-            int(
-                os.environ.get(
-                    "MAX_INFRASTRUCTURE_ATTEMPTS",
-                    "2",
-                )
-            ),
-        )
-
-    return (
-        execution.attempts,
-        int(
-            os.environ.get(
-                "MAX_TICKET_ATTEMPTS",
-                "3",
-            )
-        ),
-    )
-
-
-def apply_failure_accounting(
-    execution: CrewExecution,
-    result: CrewResult,
-    diagnosis: dict[str, object] | None = None,
-) -> bool:
-    if result.status != "retryable_failure":
-        return False
-
-    fingerprint = diagnosis.get("fingerprint") if diagnosis else None
-    shared_harness = (
-        diagnosis is not None
-        and diagnosis.get("category") == "shared_test_harness"
-        and isinstance(fingerprint, str)
-        and fingerprint not in execution.diagnosed_fingerprints
-        and execution.diagnostic_repair_attempts
-        < MAX_DIAGNOSTIC_REPAIR_ATTEMPTS
-    )
-    execution.last_failure_type = result.failure_type
-    if shared_harness:
-        execution.diagnostic_repair_attempts += 1
-        execution.diagnosed_fingerprints.append(fingerprint)
-        return True
-    if result.failure_type == "infrastructure":
-        execution.infrastructure_attempts += 1
-    else:
-        execution.attempts += 1
-    return False
-
-
-def diagnose_result(
-    change_id: str,
-    attempt: int,
-    result: CrewResult,
-) -> tuple[dict[str, object] | None, str | None]:
-    run = next(
-        (
-            run
-            for run in reversed(
-                load_attempt_evidence(change_id, attempt)["executions"]
-            )
-            if run["exitCode"] != 0
-        ),
-        None,
-    )
-    if not run:
-        if result.status != "retryable_failure":
-            return None, None
-        diagnosis = {
-            "category": "reviewer_feedback",
-            "fingerprint": hashlib.sha256(result.summary.encode()).hexdigest(),
-            "repairHint": result.summary,
-            "repairScope": [],
-        }
-        return diagnosis, save_repair_diagnosis(change_id, attempt, diagnosis)
-    output_path = PROJECT_ROOT / run["outputPath"]
-    if not output_path.is_file():
-        return None, None
-    output = output_path.read_text(encoding="utf-8")
-    if run["gate"] == "integration":
-        diagnosis = diagnose_integration_failure(output)
-        path = save_integration_diagnosis(change_id, attempt, diagnosis)
-        relative_path = path.relative_to(PROJECT_ROOT).as_posix()
-    else:
-        diagnosis = diagnose_gate_failure(run["gate"], output)
-        relative_path = save_repair_diagnosis(change_id, attempt, diagnosis)
-        path = PROJECT_ROOT / relative_path
-    diagnosis["evidence"] = {
-        "id": run["id"],
-        "gate": run["gate"],
-        "outputPath": run["outputPath"],
+def _record_usage(state: ExecutionState, role: str, output: object) -> None:
+    phase = state.phase
+    attempt = _attempt(state)
+    model_env, max_tokens_env, max_iter, default_max_tokens = ROLE_LIMITS[role]
+    max_tokens = int(os.environ.get(max_tokens_env, default_max_tokens))
+    usage = getattr(output, "token_usage", None)
+    if usage is None:
+        usage = getattr(output, "usage_metrics", None)
+    payload = {
+        "phase": phase,
+        "role": role,
+        "model": os.environ.get(model_env),
+        "limits": {"max_iter": max_iter, "max_tokens": max_tokens},
+        "attempt": attempt,
+        "usage": _serializable(usage) if usage is not None else None,
     }
-    path.write_text(json.dumps(diagnosis, indent=2), encoding="utf-8")
-    return diagnosis, relative_path
+    path = workflow.ticket_contract_path(state.change_id or "invalid", attempt).parent / f"phase-usage-{phase}-{role}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+    reference = _relative(path)
+    state.phase_usage[f"{phase}:{role}"] = reference
+    state.phase_usage[phase] = reference
+    state.phase_attempts[phase] = state.phase_attempts.get(phase, 0) + 1
 
 
-def repair_scope(path: str | None, change_id: str) -> str | None:
-    if not path:
+def _reset_for_planning(state: ExecutionState, ticket_sha256: str) -> ExecutionState:
+    state.phase = "planning"
+    state.ticket_sha256 = ticket_sha256
+    state.last_attempt += 1
+    state.plan_sha256 = None
+    state.profile = None
+    state.ticket_contract_path = None
+    state.plan_manifest_path = None
+    state.task_completion_path = None
+    state.repair_pack_path = None
+    state.review_pack_path = None
+    state.browser_result_path = None
+    return state
+
+
+def _open_spec_artifact_hashes(change_id: str) -> dict[str, str]:
+    change = active_change(change_id)
+    artifact_paths = {
+        path.relative_to(change).as_posix(): path
+        for path in [
+            change / "proposal.md",
+            change / "design.md",
+            change / "tasks.md",
+            *(change / "specs").rglob("*.md"),
+        ]
+    }
+    return {
+        name: workflow.file_sha256(path)
+        for name, path in artifact_paths.items()
+    }
+
+
+def _check_ticket(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
+    ticket_sha256 = current_ticket_sha256(ticket_id)
+    state.ticket_id = ticket_id
+    state.change_id = change_id
+    if state.ticket_sha256 is None:
+        state.ticket_sha256 = ticket_sha256
+    elif state.ticket_sha256 != ticket_sha256:
+        return _reset_for_planning(state, ticket_sha256)
+    return state
+
+
+def _current_contracts(
+    ticket_id: str, change_id: str, state: ExecutionState, *, repair: bool = False
+) -> tuple[TicketContract, PlanManifest, Path, Path] | None:
+    try:
+        if not state.ticket_contract_path or not state.plan_manifest_path or not state.plan_sha256:
+            raise ValueError("Execution state has no current planning contracts")
+        contract_path = _project_path(state.ticket_contract_path)
+        plan_path = _project_path(state.plan_manifest_path)
+        if workflow.file_sha256(plan_path) != state.plan_sha256:
+            raise ValueError("Execution plan hash is stale")
+        contract = workflow.load_model(contract_path, TicketContract)
+        manifest = workflow.load_model(plan_path, PlanManifest)
+        profile = _selected_profile(change_id)
+        artifact_paths = {name: active_change(change_id) / name for name in manifest.artifacts}
+        workflow.validate_plan_manifest(
+            manifest,
+            [criterion.id for criterion in contract.acceptance_criteria],
+            expected_profile=profile,
+            expected_ticket_sha256=state.ticket_sha256,
+            ticket_contract_path=contract_path,
+            artifact_paths=artifact_paths,
+        )
+        if manifest.ticket_id != ticket_id or manifest.change_id != change_id or state.profile != manifest.profile:
+            raise ValueError("Execution state does not match the current plan")
+        if repair:
+            if not state.repair_pack_path:
+                raise ValueError("Execution state has no RepairPack")
+            pack = workflow.load_model(_project_path(state.repair_pack_path), RepairPack)
+            workflow.validate_repair_pack(
+                pack,
+                expected_plan_sha256=state.plan_sha256,
+                expected_ticket_id=ticket_id,
+                expected_change_id=change_id,
+            )
+        return contract, manifest, contract_path, plan_path
+    except (OSError, ValueError) as error:
+        state.phase = "blocked"
+        state.phase_usage["blocked_reason"] = str(error)
         return None
-    diagnosis_path = PROJECT_ROOT / path
-    if not diagnosis_path.is_file():
-        return None
-    diagnosis = json.loads(diagnosis_path.read_text(encoding="utf-8"))
+
+
+def _write_gate_evidence(change_id: str, attempt: int, gate: GateRun) -> Path:
+    path = workflow.repair_pack_path(change_id, attempt).with_name(
+        f"{gate.name}-{gate.evidence_id or 'evidence'}.log"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(gate.output, encoding="utf-8")
+    return path
+
+
+def _repair_scope(change_id: str, gate: GateRun) -> list[str]:
+    diagnosis = (
+        diagnose_integration_failure(gate.output)
+        if gate.name == "integration"
+        else diagnose_gate_failure(gate.name, gate.output)
+    )
     scope = diagnosis.get("repairScope")
-    if not isinstance(scope, list) or not all(isinstance(item, str) for item in scope):
-        return None
-    if not scope:
-        return None
-    return json.dumps([item.replace("<change>", change_id) for item in scope])
-
-
-def run():
-    arguments = sys.argv[1:]
-    raw_id = arguments[0] if arguments else input("Ticket: ")
-    resume = "--resume" in arguments[1:]
-
-    ticket_id, change_id = normalize(
-        raw_id
-    )
-
-    try:
-        ensure_change(change_id)
-
-    except ArchivedChangeError:
-        print(
-            json.dumps(
-                {
-                    "ticket_id": ticket_id,
-                    "change_id": change_id,
-                    "status": "archived",
-                    "summary": (
-                        "El cambio ya está archivado. "
-                        "Ejecuta finalize_ticket."
-                    ),
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-        return
-
-    execution = (
-        resume_execution(change_id)
-        if resume
-        else load_execution(change_id)
-    )
-
-    attempts, max_attempts = execution_attempts(execution)
-
-    if attempts >= max_attempts:
-        result = max_attempts_result(
-            ticket_id,
-            change_id,
-            max_attempts,
-            execution,
-        )
-
-        save_result(
-            change_id,
-            result,
-        )
-
-        print(
-            result.model_dump_json(indent=2)
-        )
-        return
-
-    record_attempt = reserve_attempt(change_id, execution)
-    previous_diagnosis_path = execution.last_diagnosis_path
-    evidence_environment = {
-        name: os.environ.get(name)
-        for name in (
-            "CREW_VERIFICATION_CHANGE_ID",
-            "CREW_VERIFICATION_ATTEMPT",
-            "CREW_TICKET_ID",
-            "CREW_REPAIR_SCOPE",
-        )
+    if isinstance(scope, list) and scope and all(isinstance(path, str) for path in scope):
+        return [path.replace("<change>", change_id) for path in scope]
+    defaults = {
+        "python": ["crewai/src"],
+        "openspec": [f"openspec/changes/{change_id}"],
+        "browser_testing": ["apps", "crewai", "packages"],
+        "reviewer": ["apps", "crewai", "packages", "openspec"],
     }
+    return defaults.get(gate.name, ["apps", "crewai", "packages", "openspec"])
 
+
+def _repair_budget(gate: GateRun) -> str:
+    return gate.failure_kind
+
+
+def _block(state: ExecutionState, error: Exception | str) -> ExecutionState:
+    state.phase = "blocked"
+    state.phase_usage["blocked_reason"] = str(error)
+    return state
+
+
+def _save_repair_pack(
+    change_id: str,
+    state: ExecutionState,
+    manifest: PlanManifest,
+    plan_path: Path,
+    phase: str,
+    gate: GateRun,
+) -> ExecutionState:
+    attempt = _attempt(state)
+    evidence_path = _write_gate_evidence(change_id, attempt, gate)
+    pack = workflow.build_repair_pack(
+        manifest=manifest,
+        plan_path=plan_path,
+        phase=phase,  # type: ignore[arg-type]
+        gate=gate,
+        evidence_path=evidence_path,
+        repair_hint=gate.output,
+        repair_scope=_repair_scope(change_id, gate),
+    )
+    path = workflow.repair_pack_path(change_id, attempt)
+    workflow.save_model(path, pack)
+    state.repair_pack_path = _relative(path)
+    state.phase_usage["pending_repair_budget"] = _repair_budget(gate)
+    state.last_attempt = attempt + 1
+    state.phase = "implementing"
+    return state
+
+
+def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
     try:
-        os.environ["CREW_VERIFICATION_CHANGE_ID"] = change_id
-        os.environ["CREW_VERIFICATION_ATTEMPT"] = str(record_attempt)
-        os.environ["CREW_TICKET_ID"] = ticket_id
-        scope = repair_scope(previous_diagnosis_path, change_id)
-        if scope is None:
+        attempt = _attempt(state)
+        ticket_sha256 = state.ticket_sha256 or current_ticket_sha256(ticket_id)
+        analyst = kickoff_role(
+            "analyst",
+            inputs={
+                "ticket_id": ticket_id,
+                "change_id": change_id,
+                "ticket_sha256": ticket_sha256,
+            },
+        )
+        _record_usage(state, "analyst", analyst)
+        contract = _as_model(analyst, TicketContract)
+        if (contract.ticket_id, contract.change_id, contract.ticket_sha256) != (ticket_id, change_id, ticket_sha256):
+            raise ValueError("TicketContract does not match the current ticket")
+        contract_path = workflow.ticket_contract_path(change_id, attempt)
+        workflow.save_model(contract_path, contract)
+
+        plan_path = workflow.plan_manifest_path(change_id, attempt)
+        profile = _selected_profile(change_id)
+        artifact_hashes = _open_spec_artifact_hashes(change_id)
+        architect = kickoff_role(
+            "architect",
+            inputs={
+                "ticket_contract_path": _relative(contract_path),
+                "plan_manifest_path": _relative(plan_path),
+                "ticket_id": ticket_id,
+                "change_id": change_id,
+                "ticket_sha256": ticket_sha256,
+                "ticket_contract_sha256": workflow.file_sha256(contract_path),
+                "verification_profile": profile,
+                "base_gates": ",".join(workflow.BASE_GATES),
+                "openspec_artifact_hashes": json.dumps(artifact_hashes, sort_keys=True),
+            },
+        )
+        _record_usage(state, "architect", architect)
+        manifest = _as_model(architect, PlanManifest)
+        artifact_paths = {name: active_change(change_id) / name for name in manifest.artifacts}
+        workflow.validate_plan_manifest(
+            manifest,
+            [criterion.id for criterion in contract.acceptance_criteria],
+            expected_profile=profile,  # type: ignore[arg-type]
+            expected_ticket_sha256=ticket_sha256,
+            ticket_contract_path=contract_path,
+            artifact_paths=artifact_paths,
+        )
+        workflow.save_model(plan_path, manifest)
+        preflight = _run_gate("openspec", change_id)
+        if not preflight.passed:
+            state.phase = "blocked"
+            state.phase_usage["blocked_reason"] = preflight.output
+            return state
+        state.ticket_sha256 = ticket_sha256
+        state.ticket_contract_path = _relative(contract_path)
+        state.plan_manifest_path = _relative(plan_path)
+        state.plan_sha256 = workflow.file_sha256(plan_path)
+        state.profile = manifest.profile
+        state.phase = "implementing"
+        return state
+    except (OSError, ValueError, KeyError) as error:
+        state.phase = "blocked"
+        state.phase_usage["blocked_reason"] = str(error)
+        return state
+
+
+def run_programmer(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
+    previous_scope = os.environ.get("CREW_REPAIR_SCOPE")
+    try:
+        contracts = _current_contracts(ticket_id, change_id, state, repair=bool(state.repair_pack_path))
+        if not contracts:
+            return state
+        _, _, _, plan_path = contracts
+        if state.repair_pack_path:
+            budget = state.phase_usage.get("pending_repair_budget", "ticket")
+            if budget not in {"ticket", "infrastructure"}:
+                raise ValueError("Execution state has an invalid repair budget")
+            attempts = state.phase_usage.setdefault("repair_attempts", {"ticket": 0, "infrastructure": 0})
+            if not isinstance(attempts, dict) or not isinstance(attempts.get(budget, 0), int):
+                raise ValueError("Execution state has invalid repair attempts")
+            maximum = int(os.environ.get(
+                "MAX_INFRASTRUCTURE_ATTEMPTS" if budget == "infrastructure" else "MAX_TICKET_ATTEMPTS",
+                "2" if budget == "infrastructure" else "3",
+            ))
+            if attempts[budget] >= maximum:
+                return _block(state, f"Se alcanzaron {maximum} intentos de reparación {budget}.")
+            attempts[budget] += 1
+            pack = workflow.load_model(_project_path(state.repair_pack_path), RepairPack)
+            if not pack.repair_scope:
+                raise ValueError("RepairPack has no allowed repair scope")
+            os.environ["CREW_REPAIR_SCOPE"] = json.dumps(pack.repair_scope)
+        else:
+            os.environ.pop("CREW_REPAIR_SCOPE", None)
+        output = kickoff_role(
+            "programmer",
+            inputs={
+                "plan_manifest_path": _relative(plan_path),
+                "repair_pack_path": state.repair_pack_path or "NONE",
+            },
+        )
+        _record_usage(state, "programmer", output)
+        manifest = workflow.load_model(plan_path, PlanManifest)
+        completion = workflow.build_task_completion(
+            manifest,
+            plan_path,
+            active_change(change_id) / "tasks.md",
+            _task_completion_evidence(manifest, state, plan_path),
+        )
+        completion_path = workflow.task_completion_path(change_id, _attempt(state))
+        workflow.save_model(completion_path, completion)
+        state.task_completion_path = _relative(completion_path)
+        state.phase = "verifying"
+        return state
+    except Exception as error:
+        return _block(state, error)
+    finally:
+        if previous_scope is None:
             os.environ.pop("CREW_REPAIR_SCOPE", None)
         else:
-            os.environ["CREW_REPAIR_SCOPE"] = scope
-        inputs = {
-            "ticket_id": ticket_id,
-            "change_id": change_id,
-            "attempt": record_attempt,
-            "last_attempt_path": last_attempt(change_id),
-            "last_evidence_path": last_evidence_path(change_id),
-            "last_repair_diagnosis_path": previous_diagnosis_path or "NONE",
-        }
-        crew = KotyAppCrew()
-        supervised = hasattr(crew, "planning_crew")
-        if supervised:
-            crew.planning_crew().kickoff(inputs=inputs)
-            preflight = run_gate("openspec", change_id)
-            if not preflight.passed:
-                result = gate_failure(
-                    ticket_id,
-                    change_id,
-                    "openspec",
-                    preflight.evidence_id,
-                    preflight.output,
-                )
-            else:
-                output = crew.delivery_crew().kickoff(inputs=inputs)
-                result = result_from_verdict(parse_review_verdict(output))
-                result = apply_tester_result(change_id, output, result)
-                result = apply_supervisor_gates(change_id, result)
-        else:
-            output = crew.crew().kickoff(inputs=inputs)
-            result = parse_crew_result(output)
-        result.attempt = record_attempt
+            os.environ["CREW_REPAIR_SCOPE"] = previous_scope
 
-        if (
-            result.ticket_id.upper()
-            != ticket_id
-        ):
-            raise RuntimeError(
-                "CrewResult pertenece "
-                "a otro ticket"
-            )
 
-        if result.change_id != change_id:
-            raise RuntimeError(
-                "CrewResult pertenece "
-                "a otro change_id"
-            )
-
-        if not supervised and result.status != "retryable_failure":
-            evidence_error = validate_reviewer_evidence(
-                change_id,
-                result,
-                record_attempt,
-            )
-            if evidence_error:
-                result = verification_evidence_failure(
-                    ticket_id,
-                    change_id,
-                    record_attempt,
-                    evidence_error,
-                    result,
-                )
-
-    except Exception as error:
-        traceback.print_exc()
-        result = runtime_failure(
-            ticket_id,
-            change_id,
-            error,
+def _gate_evidence_records(change_id: str, state: ExecutionState, gates: list[GateRun]) -> list[dict[str, object]]:
+    attempt = _attempt(state)
+    records = []
+    for gate in gates:
+        if not gate.evidence_id:
+            raise ValueError(f"Gate {gate.name} has no evidence ID")
+        path = _write_gate_evidence(change_id, attempt, gate)
+        records.append(
+            {
+                "name": gate.name,
+                "passed": gate.passed,
+                "evidence_id": gate.evidence_id,
+                "evidence_path": _relative(path),
+                "evidence_sha256": workflow.file_sha256(path),
+            }
         )
+    return records
 
+
+def run_verification(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
+    contracts = _current_contracts(ticket_id, change_id, state)
+    if not contracts:
+        return state
+    _, manifest, _, plan_path = contracts
+    try:
+        if not state.task_completion_path:
+            raise ValueError("Execution state has no TaskCompletion")
+        workflow.validate_task_completion(
+            workflow.load_model(_project_path(state.task_completion_path), TaskCompletion),
+            manifest,
+            plan_path,
+            active_change(change_id) / "tasks.md",
+        )
+    except (OSError, ValueError) as error:
+        return _block(state, error)
+    gates = run_base_gates(ticket_id, change_id)
+    if tuple(gate.name for gate in gates) != workflow.BASE_GATES:
+        return _block(state, "Base gate results do not match the immutable gate list")
+    try:
+        state.phase_usage["gate_runs"] = _gate_evidence_records(change_id, state, gates)
+    except (OSError, ValueError) as error:
+        return _block(state, error)
+    failed = next((gate for gate in gates if not gate.passed), None)
+    if failed:
+        return _save_repair_pack(change_id, state, manifest, plan_path, "verifying", failed)
+    if manifest.profile in {"browser", "browser_operational"}:
+        state.phase = "browser_testing"
+        return state
+    browser_path = workflow.browser_result_path(change_id, _attempt(state))
+    workflow.save_model(
+        browser_path,
+        TesterResult(status="skipped", summary="Browser testing is not required by the profile."),
+    )
+    state.browser_result_path = _relative(browser_path)
+    state.phase = "reviewing"
+    return state
+
+
+def run_browser_testing(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
+    try:
+        contracts = _current_contracts(ticket_id, change_id, state)
+        if not contracts:
+            return state
+        _, manifest, _, plan_path = contracts
+        path = workflow.browser_result_path(change_id, _attempt(state))
+        if manifest.profile not in {"browser", "browser_operational"}:
+            workflow.save_model(path, TesterResult(status="skipped", summary="Browser testing is not required by the profile."))
+            state.browser_result_path = _relative(path)
+            state.phase = "reviewing"
+            return state
+        output = kickoff_role(
+            "tester",
+            inputs={
+                "verification_profile_path": _relative(active_change(change_id) / "design.md"),
+                "scenario_paths": "NONE",
+            },
+        )
+        _record_usage(state, "tester", output)
+        result = _as_model(output, TesterResult)
+        workflow.save_model(path, result)
+        state.browser_result_path = _relative(path)
+        if result.status == "passed":
+            state.phase = "reviewing"
+            return state
+        return _save_repair_pack(
+            change_id,
+            state,
+            manifest,
+            plan_path,
+            "browser_testing",
+            GateRun("browser_testing", False, f"browser-{_attempt(state)}", result.summary),
+        )
+    except Exception as error:
+        return _block(state, error)
+
+
+def _changed_paths() -> list[Path]:
+    result = subprocess.run(
+        ["git", "diff", "--name-only"], cwd=workflow.PROJECT_ROOT, capture_output=True, text=True, check=False
+    )
+    return [workflow.PROJECT_ROOT / name for name in result.stdout.splitlines() if (workflow.PROJECT_ROOT / name).is_file()]
+
+
+def _diff_summary() -> str:
+    result = subprocess.run(
+        ["git", "diff", "--stat"], cwd=workflow.PROJECT_ROOT, capture_output=True, text=True, check=False
+    )
+    return result.stdout.strip() or "No changes."
+
+
+def _gate_runs_from_state(state: ExecutionState) -> list[GateRun]:
+    records = state.phase_usage.get("gate_runs")
+    if not isinstance(records, list):
+        raise ValueError("Execution state has no base gate evidence")
+    runs = []
+    for record in records:
+        if not isinstance(record, dict):
+            raise ValueError("Execution state has invalid base gate evidence")
+        path = _project_path(str(record.get("evidence_path", "")))
+        expected_hash = record.get("evidence_sha256")
+        if not isinstance(expected_hash, str) or not path.is_file() or workflow.file_sha256(path) != expected_hash:
+            raise ValueError("Execution state base gate evidence is stale")
+        runs.append(GateRun(
+            str(record.get("name", "")),
+            record.get("passed") is True,
+            record.get("evidence_id") if isinstance(record.get("evidence_id"), str) else None,
+            path.read_text(encoding="utf-8"),
+        ))
+    if tuple(run.name for run in runs) != workflow.BASE_GATES:
+        raise ValueError("Execution state base gate evidence is stale")
+    return runs
+
+
+def _gate_evidence_from_state(state: ExecutionState) -> dict[str, dict[str, str]]:
+    records = state.phase_usage.get("gate_runs")
+    if not isinstance(records, list):
+        raise ValueError("Execution state has no base gate evidence")
+    evidence = {}
+    for record in records:
+        if not isinstance(record, dict):
+            raise ValueError("Execution state has invalid base gate evidence")
+        name = record.get("name")
+        evidence_id = record.get("evidence_id")
+        path = record.get("evidence_path")
+        digest = record.get("evidence_sha256")
+        if not all(isinstance(value, str) for value in (name, evidence_id, path, digest)):
+            raise ValueError("Execution state has invalid base gate evidence")
+        evidence[name] = {"evidence_id": evidence_id, "path": path, "sha256": digest}
+    if set(evidence) != set(workflow.BASE_GATES):
+        raise ValueError("Execution state has invalid base gate evidence")
+    return evidence
+
+
+def _operational_evidence(manifest: PlanManifest, modified_paths: list[Path]) -> dict[str, list[Path]]:
+    if manifest.profile not in {"operational", "browser_operational"}:
+        return {}
+    change = active_change(manifest.change_id).resolve()
+    evidence_paths = [path for path in modified_paths if not path.resolve().is_relative_to(change)]
+    return {criterion: evidence_paths for criterion in manifest.acceptance_map}
+
+
+def _task_completion_evidence(
+    manifest: PlanManifest,
+    state: ExecutionState,
+    plan_path: Path,
+) -> dict[str, list[Path]]:
+    change = active_change(manifest.change_id).resolve()
+    evidence_paths = [
+        path
+        for path in _changed_paths()
+        if not path.resolve().is_relative_to(change)
+    ]
+    if state.task_completion_path:
+        previous = workflow.load_model(
+            _project_path(state.task_completion_path), TaskCompletion
+        )
+        workflow.validate_task_completion(
+            previous,
+            manifest,
+            plan_path,
+            active_change(manifest.change_id) / "tasks.md",
+        )
+        for evidence in previous.acceptance_evidence.values():
+            evidence_paths.extend(_project_path(path) for path in evidence)
+    unique_paths = list(dict.fromkeys(path.resolve() for path in evidence_paths))
+    return {criterion: unique_paths for criterion in manifest.acceptance_map}
+
+
+def run_review(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
+    contracts = _current_contracts(ticket_id, change_id, state)
+    if not contracts:
+        return state
+    _, manifest, contract_path, plan_path = contracts
+    try:
+        if not state.browser_result_path:
+            raise ValueError("Execution state has no browser result")
+        if not state.task_completion_path:
+            raise ValueError("Execution state has no TaskCompletion")
+        browser_path = _project_path(state.browser_result_path)
+        task_completion_path = _project_path(state.task_completion_path)
+        artifact_paths = {name: active_change(change_id) / name for name in manifest.artifacts}
+        modified_paths = _changed_paths()
+        pack = workflow.build_review_pack(
+            manifest=manifest,
+            ticket_contract_path=contract_path,
+            plan_path=plan_path,
+            artifact_paths=artifact_paths,
+            modified_paths=modified_paths,
+            gate_runs=_gate_runs_from_state(state),
+            gate_evidence=_gate_evidence_from_state(state),
+            browser_result_path=browser_path,
+            task_completion_path=task_completion_path,
+            incomplete_tasks=False,
+            diff_summary=_diff_summary(),
+            operational_evidence=_operational_evidence(manifest, modified_paths),
+        )
+        path = workflow.review_pack_path(change_id, _attempt(state))
+        workflow.save_model(path, pack)
+        workflow.validate_review_pack(pack, expected_plan_sha256=state.plan_sha256)
+        state.review_pack_path = _relative(path)
+        output = kickoff_role("reviewer", inputs={"review_pack_path": state.review_pack_path})
+        _record_usage(state, "reviewer", output)
+        verdict = _as_model(output, ReviewVerdict)
+        if verdict.ticket_id != ticket_id or verdict.change_id != change_id:
+            raise ValueError("ReviewVerdict does not match the current ticket")
+        if verdict.status == "approved":
+            state.phase = "approved"
+            return state
+        if verdict.status == "retryable_failure":
+            return _save_repair_pack(
+                change_id,
+                state,
+                manifest,
+                plan_path,
+                "reviewing",
+                GateRun("reviewer", False, f"reviewer-{_attempt(state)}", verdict.summary),
+            )
+        state.phase = "blocked"
+        return state
+    except (OSError, ValueError, KeyError) as error:
+        state.phase = "blocked"
+        state.phase_usage["blocked_reason"] = str(error)
+        return state
+
+
+def advance_phase(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
+    had_current_plan = bool(state.ticket_contract_path or state.plan_manifest_path)
+    state = _check_ticket(ticket_id, change_id, state)
+    if had_current_plan and state.phase == "planning" and state.plan_manifest_path is None:
+        return state
+    if state.phase == "planning":
+        return run_planning(ticket_id, change_id, state)
+    if state.phase == "implementing":
+        return run_programmer(ticket_id, change_id, state)
+    if state.phase == "verifying":
+        return run_verification(ticket_id, change_id, state)
+    if state.phase == "browser_testing":
+        return run_browser_testing(ticket_id, change_id, state)
+    if state.phase == "reviewing":
+        return run_review(ticket_id, change_id, state)
+    return state
+
+
+def run_ticket(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
+    previous_environment = {name: os.environ.get(name) for name in (
+        "CREW_VERIFICATION_CHANGE_ID", "CREW_VERIFICATION_ATTEMPT", "CREW_TICKET_ID"
+    )}
+    try:
+        for _ in range(20):
+            state = _check_ticket(ticket_id, change_id, state)
+            if state.phase in {"approved", "blocked"}:
+                break
+            os.environ["CREW_VERIFICATION_CHANGE_ID"] = change_id
+            os.environ["CREW_VERIFICATION_ATTEMPT"] = str(_attempt(state))
+            os.environ["CREW_TICKET_ID"] = ticket_id
+            if state.phase == "planning" and not state.ticket_contract_path:
+                state = run_planning(ticket_id, change_id, state)
+            else:
+                state = advance_phase(ticket_id, change_id, state)
+            workflow.save_execution(ticket_id, state)
+        else:
+            state.phase = "blocked"
+            state.phase_usage["blocked_reason"] = "Phase machine exceeded its dispatch limit"
     finally:
-        for name, value in evidence_environment.items():
+        for name, value in previous_environment.items():
             if value is None:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
         close_playwright_session()
         close_local_environment()
+    workflow.save_execution(ticket_id, state)
+    return state
 
-    if result.failure_stage == "openspec_preflight":
-        diagnosis = diagnose_gate_failure("openspec", result.summary)
-        diagnosis["evidence"] = {
-            "id": result.evidence.get("openspec"),
-            "gate": "openspec",
-        }
-        diagnosis_path = save_repair_diagnosis(
-            change_id,
-            record_attempt,
-            diagnosis,
-        )
-    else:
-        diagnosis, diagnosis_path = diagnose_result(
-            change_id,
-            record_attempt,
-            result,
-        )
-    execution.last_diagnosis_path = None
 
-    save_result(
-        change_id,
-        result,
+def run() -> None:
+    parser = argparse.ArgumentParser(prog="run_crew")
+    parser.add_argument("ticket_id", nargs="?", help="Identificador del ticket de Linear")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--resume", action="store_true", help="Continúa la fase persistida")
+    modes.add_argument("--replan", action="store_true", help="Invalida los contratos de planificación")
+    args = parser.parse_args()
+    ticket_id, change_id = normalize(args.ticket_id or input("Ticket: "))
+    ensure_change(change_id)
+    try:
+        state = workflow.load_execution(ticket_id)
+    except ValueError:
+        state = ExecutionState(ticket_id=ticket_id, change_id=change_id)
+    if args.replan:
+        state.ticket_id = ticket_id
+        state.change_id = change_id
+        state = _reset_for_planning(state, current_ticket_sha256(ticket_id))
+        workflow.save_execution(ticket_id, state)
+    state = run_ticket(ticket_id, change_id, state)
+    gate_statuses = {name: "skipped" for name in workflow.BASE_GATES}
+    evidence = {}
+    records = state.phase_usage.get("gate_runs")
+    if isinstance(records, list):
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            name = record.get("name")
+            if name not in gate_statuses:
+                continue
+            gate_statuses[name] = "passed" if record.get("passed") is True else "failed"
+            if isinstance(record.get("evidence_id"), str):
+                evidence[name] = record["evidence_id"]
+    playwright = "skipped"
+    if state.browser_result_path:
+        try:
+            playwright = workflow.load_model(
+                _project_path(state.browser_result_path), TesterResult
+            ).status
+        except ValueError:
+            playwright = "failed"
+    result = CrewResult(
+        ticket_id=ticket_id,
+        change_id=change_id,
+        attempt=state.last_attempt,
+        evidence=evidence,
+        status="approved" if state.phase == "approved" else "blocked" if state.phase == "blocked" else "retryable_failure",
+        summary=state.phase_usage.get("blocked_reason", f"Phase {state.phase}.") if isinstance(state.phase_usage.get("blocked_reason", f"Phase {state.phase}."), str) else f"Phase {state.phase}.",
+        verification=VerificationResult(
+            **gate_statuses,
+            playwright=playwright,
+        ),
     )
-
-    if result.status != "approved":
-        granted_repair_credit = apply_failure_accounting(
-            execution,
-            result,
-            diagnosis,
-        )
-        if diagnosis_path:
-            execution.last_diagnosis_path = diagnosis_path
-        save_execution(change_id, execution)
-        save_attempt(
-            change_id,
-            record_attempt,
-            result,
-        )
-    else:
-        save_execution(change_id, execution)
-
-    print(
-        result.model_dump_json(indent=2)
-    )
+    workflow.save_model(active_change(change_id) / "result.json", result)
+    print(state.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":

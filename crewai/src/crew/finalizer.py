@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 CREWAI_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = CREWAI_ROOT.parent
+PROFILE_PATTERN = re.compile(r"^verification_profile:\s*(\S+)\s*$", re.MULTILINE)
 
 load_dotenv(CREWAI_ROOT / ".env")
 
@@ -17,7 +18,8 @@ load_dotenv(CREWAI_ROOT / ".env")
 from .linear_api import complete_issue, get_issue
 from .evidence import validate_reviewer_evidence
 from .integration_env import environment
-from .models import CrewResult
+from .models import CrewResult, PlanManifest, ReviewPack, TicketContract
+from . import workflow
 
 
 def normalize(raw_id: str) -> tuple[str, str]:
@@ -92,29 +94,6 @@ def _find_change(
         return None
 
     return matches[0], True
-
-
-def _has_pending_tasks(
-    change: Path,
-) -> bool:
-    tasks = change / "tasks.md"
-
-    if not tasks.is_file():
-        raise RuntimeError(
-            "No existe tasks.md"
-        )
-
-    content = tasks.read_text(
-        encoding="utf-8"
-    )
-
-    return bool(
-        re.search(
-            r"^\s*-\s*\[\s\]",
-            content,
-            flags=re.MULTILINE,
-        )
-    )
 
 
 def _browser_strategy(
@@ -247,6 +226,80 @@ def _check_crew_result(
         raise RuntimeError(
             "Playwright no aprobado"
         )
+
+
+def _state_path(reference: str) -> Path:
+    candidate = Path(reference)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise RuntimeError("ExecutionState contiene una ruta fuera del proyecto")
+    path = (workflow.PROJECT_ROOT / candidate).resolve()
+    if not path.is_relative_to(workflow.PROJECT_ROOT.resolve()):
+        raise RuntimeError("ExecutionState contiene una ruta fuera del proyecto")
+    return path
+
+
+def _selected_profile(change_id: str) -> str:
+    design = workflow.PROJECT_ROOT / "openspec" / "changes" / change_id / "design.md"
+    match = PROFILE_PATTERN.search(design.read_text(encoding="utf-8")) if design.is_file() else None
+    if not match or match.group(1) not in {"standard", "browser", "operational", "browser_operational"}:
+        raise ValueError("OpenSpec design has no valid verification_profile")
+    return match.group(1)
+
+
+def _check_review_pack(ticket_id: str, change_id: str) -> str:
+    try:
+        state = workflow.load_execution(ticket_id)
+        if (
+            state.ticket_id != ticket_id
+            or state.change_id != change_id
+            or state.phase != "approved"
+            or not state.ticket_sha256
+            or not state.plan_sha256
+            or not state.profile
+            or not state.ticket_contract_path
+            or not state.plan_manifest_path
+            or not state.review_pack_path
+        ):
+            raise ValueError("ExecutionState has no current approved contracts")
+
+        contract_path = _state_path(state.ticket_contract_path)
+        plan_path = _state_path(state.plan_manifest_path)
+        review_path = _state_path(state.review_pack_path)
+        if workflow.file_sha256(plan_path) != state.plan_sha256:
+            raise ValueError("PlanManifest plan hash is stale")
+        contract = workflow.load_model(contract_path, TicketContract)
+        manifest = workflow.load_model(plan_path, PlanManifest)
+        selected_profile = _selected_profile(change_id)
+        artifact_paths = {
+            name: workflow.PROJECT_ROOT / "openspec" / "changes" / change_id / name
+            for name in manifest.artifacts
+        }
+        workflow.validate_plan_manifest(
+            manifest,
+            [criterion.id for criterion in contract.acceptance_criteria],
+            expected_profile=selected_profile,
+            expected_ticket_sha256=state.ticket_sha256,
+            ticket_contract_path=contract_path,
+            artifact_paths=artifact_paths,
+        )
+        if manifest.ticket_id != ticket_id or manifest.change_id != change_id:
+            raise ValueError("PlanManifest does not match the current ticket")
+
+        review = workflow.load_model(review_path, ReviewPack)
+        workflow.validate_review_pack(review, expected_plan_sha256=state.plan_sha256)
+        if (
+            review.ticket_id != ticket_id
+            or review.change_id != change_id
+            or review.ticket_sha256 != state.ticket_sha256
+            or state.profile != selected_profile
+            or review.profile != selected_profile
+        ):
+            raise ValueError("ReviewPack does not match the current execution")
+        if review.incomplete_tasks:
+            raise ValueError("ReviewPack has incomplete tasks")
+        return selected_profile
+    except (OSError, ValueError) as error:
+        raise RuntimeError(f"ReviewPack invalid: {error}") from error
 
 
 def _run_code_gates() -> None:
@@ -475,18 +528,10 @@ def finalize(
 
         _check_branch(change_id)
 
-        stage = "tasks"
+        stage = "review_pack"
 
-        if _has_pending_tasks(change):
-            raise RuntimeError(
-                "tasks.md tiene tareas pendientes"
-            )
-
-        stage = "design"
-
-        browser_strategy = (
-            _browser_strategy(change)
-        )
+        profile = _check_review_pack(ticket_id, change_id)
+        browser_strategy = "required" if profile in {"browser", "browser_operational"} else "not_required"
 
         stage = "crew_result"
 
@@ -585,8 +630,8 @@ def finalize(
             not now_archived
             and stage
             in {
-                "tasks",
                 "design",
+                "review_pack",
                 "crew_result",
                 "verification",
                 "openspec_validate",

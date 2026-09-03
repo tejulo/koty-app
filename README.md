@@ -186,7 +186,7 @@ Exporta configuraciones compartidas de TypeScript y ESLint. Tailwind CSS permane
 
 `ralph.sh` es el supervisor local del flujo Linear -> CrewAI. El modo normal (`./ralph.sh`, `--once` o `--max-iterations N`) ejecuta OpenCode con el agente `.opencode/agents/ralph-linear.md` y registra logs en `.agent/history/`.
 
-`./ralph.sh --until-finalized` usa `scripts/coordinate-crew-ticket.sh` y no invoca OpenCode: selecciona un ticket con `crew_queue next`, asegura su branch, inicia el ticket, supervisa `run-crew-ticket.sh` y llama a `finalize_ticket` hasta obtener un estado terminal. Usa `--resume` para reintentar una ejecución bloqueada.
+`./ralph.sh --until-finalized` usa `scripts/coordinate-crew-ticket.sh` y no invoca OpenCode: selecciona un ticket con `crew_queue next`, asegura su branch, inicia el ticket, supervisa `run-crew-ticket.sh` y llama a `finalize_ticket` hasta obtener un estado terminal. `--resume` solo continua una fase persistida no terminal y sus contratos validos; no reinicia ni desbloquea una ejecucion en `blocked`. Un cambio en el hash del ticket es la invalidacion automatica separada que vuelve a `planning`. `--replan` es la unica invalidacion manual de planificacion: reinicia en `planning` incluso desde `blocked`, conserva la evidencia de intentos anteriores y vuelve a ejecutar el flujo; no garantiza que la causa subyacente del bloqueo desaparezca.
 
 Configura en `crewai/.env` `LINEAR_QUEUE_ASSIGNEE_EMAIL` y `LINEAR_QUEUE_MILESTONE` para que Ralph pueda seleccionar tickets. El coordinador espera 30 segundos entre sondeos por defecto (`CREW_TICKET_WAIT_SECONDS`) y reintenta después de 5 segundos (`CREW_RETRY_DELAY_SECONDS`); el worker tiene un timeout de 1800 segundos (`CREW_TICKET_TIMEOUT_SECONDS`).
 
@@ -195,6 +195,12 @@ Prueba el supervisor con `bash scripts/tests/ralph.test.sh`; `pnpm test:shell` t
 ## CrewAI
 
 El subproyecto `crewai/` automatiza analisis, planificacion, implementacion y revision de cambios mediante agentes. Sus dependencias se administran exclusivamente con `uv` y las sincroniza el bootstrap correspondiente a la plataforma: `./scripts/bootstrap.sh` en Unix o `scripts/bootstrap.ps1` en Windows.
+
+La ejecucion supervisada es una maquina de fases persistente: `planning` (Analyst, Architect y preflight OpenSpec), `implementing` (Programmer), `verifying` (puertas base), `browser_testing` cuando el perfil lo requiere, `reviewing` (Reviewer), `approved` o `blocked`. Cada rol se ejecuta aislado y recibe rutas a contratos persistidos, no conversaciones de otros roles.
+
+Los perfiles cerrados son `standard`, `browser`, `operational` y `browser_operational`. Todos conservan, sin sustituciones ni eliminaciones, las puertas base `python`, `lint`, `test`, `build`, `integration` y validacion estricta de OpenSpec. `standard` no agrega evidencia; `browser` requiere evidencia Browser E2E aprobada de Tester; `operational` exige que ReviewPack relacione cada criterio operacional con un documento, prueba o artefacto fuente versionado y su hash; `browser_operational` exige ambas evidencias. Solo `browser` y `browser_operational` ejecutan Tester; los demas guardan un resultado de navegador `skipped`.
+
+El estado operativo se guarda sin versionar en `.agent/crew/<ticket>/execution.json`. Los contratos, evidencia, RepairPack, ReviewPack y metricas de uso de cada invocacion de rol se conservan en `openspec/changes/<change-id>/attempts/<attempt>/` para acompanar el cambio. Tras cada invocacion de un rol, las metricas registran fase, rol, modelo, limites configurados, intento y la carga de uso de CrewAI cuando esta disponible.
 
 Configura en `crewai/.env` las claves y modelos requeridos por el archivo de ejemplo:
 

@@ -24,6 +24,7 @@ set -euo pipefail
 
 [[ "$1" == "run" && "$2" == "--project" && "$4" == "run_crew" ]] || exit 2
 printf '%s\n' start >>"$MOCK_ROOT/starts"
+printf '%s\n' "$*" >>"$MOCK_ROOT/crew-arguments"
 sleep "${MOCK_DELAY_SECONDS:-0}"
 printf '%s\n' 'CrewAI completed'
 mkdir -p "$MOCK_ROOT/openspec/changes/dev-6"
@@ -163,6 +164,39 @@ result="$(
 
 [[ "$(wc -l <"$fixture/starts")" == 1 ]] || {
   printf 'FAIL: --resume did not start exactly one worker\n' >&2
+  exit 1
+}
+
+[[ "$(tail -n 1 "$fixture/crew-arguments")" == *'run_crew DEV-6 --resume' ]] || {
+  printf 'FAIL: --resume was not passed to CrewAI without --replan\n' >&2
+  exit 1
+}
+
+result="$(
+  PATH="$fixture/bin:$PATH" \
+  MOCK_ROOT="$fixture" \
+  CREW_TICKET_WAIT_SECONDS=2 \
+  "$fixture/scripts/run-crew-ticket.sh" DEV-6 --start --replan
+)"
+
+[[ "$result" == *'"status":"approved"'* ]] || {
+  printf 'FAIL: --replan did not start CrewAI\n' >&2
+  exit 1
+}
+
+[[ "$(tail -n 1 "$fixture/crew-arguments")" == *'run_crew DEV-6 --replan' ]] || {
+  printf 'FAIL: --replan was not passed to CrewAI\n' >&2
+  exit 1
+}
+
+set +e
+PATH="$fixture/bin:$PATH" MOCK_ROOT="$fixture" \
+  "$fixture/scripts/run-crew-ticket.sh" DEV-6 --start --resume --replan >/dev/null 2>&1
+conflicting_modes_exit=$?
+set -e
+
+[[ "$conflicting_modes_exit" != 0 ]] || {
+  printf 'FAIL: runner accepted --resume with --replan\n' >&2
   exit 1
 }
 

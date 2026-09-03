@@ -9,7 +9,7 @@ Automatización del flujo de desarrollo de tickets utilizando:
 * uv
 * pnpm
 
-El objetivo de este módulo es tomar un ticket de Linear y ejecutar automáticamente un flujo de:
+El objetivo de este modulo es tomar un ticket de Linear y ejecutar una maquina de fases persistente:
 
 ```text
 Linear
@@ -18,16 +18,36 @@ Requirements Analyst
   ↓
 Software Architect
   ↓
-OpenSpec
+OpenSpec preflight
   ↓
 Senior Software Developer
   ↓
-Tester
+Puertas base
+  ↓
+Tester (solo perfiles de navegador)
   ↓
 Quality Reviewer
   ↓
-OpenSpec Archive
+Approved / blocked
 ```
+
+Las fases persistidas son `planning`, `implementing`, `verifying`,
+`browser_testing`, `reviewing`, `approved` y `blocked`. Cada rol se invoca en
+un CrewAI aislado de una sola tarea y recibe rutas a sus contratos de fase, no
+la conversacion completa de otro rol. Ralph mantiene la cola, el branch, el
+worker y la finalizacion local.
+
+Los perfiles de verificacion cerrados son `standard`, `browser`,
+`operational` y `browser_operational`. Todos ejecutan las puertas inmutables
+`python`, `lint`, `test`, `build`, `integration` y validacion estricta de
+OpenSpec.
+
+| Perfil | Evidencia adicional |
+| --- | --- |
+| `standard` | Ninguna; el supervisor persiste un resultado de navegador `skipped`. |
+| `browser` | Evidencia Browser E2E aprobada de Tester. |
+| `operational` | ReviewPack relaciona cada criterio operacional con un documento, prueba o artefacto fuente versionado y su hash. |
+| `browser_operational` | Ambas evidencias: Browser E2E aprobada y evidencia operacional con hash. |
 
 ---
 
@@ -173,6 +193,12 @@ ZEN_CODER_MODEL=
 ZEN_TESTER_MODEL=
 ZEN_REVIEWER_MODEL=
 
+ZEN_ANALYST_MAX_TOKENS=800
+ZEN_ARCHITECT_MAX_TOKENS=1200
+ZEN_CODER_MAX_TOKENS=2500
+ZEN_TESTER_MAX_TOKENS=600
+ZEN_REVIEWER_MAX_TOKENS=800
+
 CREWAI_TRACING_ENABLED=false
 OTEL_SDK_DISABLED=true
 ```
@@ -211,6 +237,12 @@ ZEN_REVIEWER_MODEL=
 
 Esto permite utilizar modelos económicos para análisis y modelos más potentes para arquitectura o programación.
 
+Los limites predeterminados son Analyst `4`/`800`, Architect `12`/`1200`,
+Programmer `20`/`2500`, Tester `8`/`600` y Reviewer `8`/`800` para
+`max_iter`/`max_tokens`. Tras cada invocacion, el supervisor conserva fase,
+rol, modelo, limites, intento y la carga de uso de CrewAI cuando esta
+disponible, despues de cada invocacion de rol.
+
 ---
 
 # Ejecutar el Crew
@@ -230,6 +262,26 @@ uv run run_crew "$TICKET_ACTIVO"
 El programa normaliza el identificador. Usa un ticket activo para cualquier
 ejecucion que pueda crear o modificar artefactos; `DEV-5` solo sirve para
 verificar la normalizacion porque su cambio ya esta archivado.
+
+Para continuar una ejecucion interrumpida sin invalidar contratos validos:
+
+```bash
+uv run run_crew "$TICKET_ACTIVO" --resume
+```
+
+Para invalidar manualmente la planificacion y volver a `planning`:
+
+```bash
+uv run run_crew "$TICKET_ACTIVO" --replan
+```
+
+`--resume` y `--replan` son mutuamente excluyentes. `--replan` es la unica
+invalidacion manual de planificacion: elimina de forma atomica las referencias
+de contratos de planificacion del estado actual, incluso si esta `blocked`, y
+conserva toda la evidencia de intentos anteriores antes de volver a ejecutar el
+flujo desde `planning`. No garantiza que desaparezca la causa subyacente del
+bloqueo. Un cambio en el hash del ticket invalida la planificacion
+automaticamente.
 
 Por ejemplo:
 
@@ -258,9 +310,15 @@ Para ejecutar CrewAI desde el supervisor local, usa desde la raíz:
 
 Este modo no invoca OpenCode. `scripts/coordinate-crew-ticket.sh` selecciona un ticket mediante `crew_queue next`, cambia o crea su branch, inicia Linear, ejecuta `scripts/run-crew-ticket.sh` y reintenta la finalización hasta obtener `done`, `blocked` o un error no recuperable.
 
-Configura `LINEAR_QUEUE_ASSIGNEE_EMAIL` y `LINEAR_QUEUE_MILESTONE` en `crewai/.env`; ambos son necesarios para `crew_queue next`. Usa `./ralph.sh --until-finalized --resume` para crear una nueva ejecución CrewAI después de un resultado bloqueado.
+Configura `LINEAR_QUEUE_ASSIGNEE_EMAIL` y `LINEAR_QUEUE_MILESTONE` en `crewai/.env`; ambos son necesarios para `crew_queue next`. `./ralph.sh --until-finalized --resume` solo continua una fase persistida no terminal y no reinicia ni desbloquea un resultado `blocked`. Un cambio en el hash del ticket es la invalidacion automatica separada. `--replan` es la unica invalidacion manual de planificacion: el coordinador y runner la aceptan desde `blocked`, reinician `planning`, conservan la evidencia de intentos anteriores y vuelven a ejecutar el flujo. No garantiza que desaparezca la causa subyacente del bloqueo.
 
 El coordinador sondea cada 30 segundos por defecto (`CREW_TICKET_WAIT_SECONDS`) y espera 5 segundos entre reintentos (`CREW_RETRY_DELAY_SECONDS`). El runner cancela una ejecución después de 1800 segundos (`CREW_TICKET_TIMEOUT_SECONDS`) y conserva estado, logs y resultados bajo `.agent/crew/<ticket>/`; esos artefactos no se versionan.
+
+El estado de proceso se guarda en `.agent/crew/<ticket>/execution.json`. Los
+artefactos de intentos que deben sobrevivir con el cambio se guardan en
+`openspec/changes/<change-id>/attempts/<attempt>/`: TicketContract,
+PlanManifest, RepairPack, resultado de navegador, ReviewPack, evidencia y
+metricas de uso por invocacion de rol.
 
 Estados JSON relevantes:
 
@@ -496,18 +554,33 @@ a:
 
 ---
 
-# Verificaciones del Programmer
+# Verificaciones autoritativas
 
-Antes de finalizar, desde la raiz se ejecuta la puerta completa:
+El supervisor, no el Programmer, ejecuta las puertas base de la maquina de
+fases, una por una:
 
 ```bash
-pnpm verify
+cd crewai
+uv run python -m compileall -q src/crew
+cd ..
+pnpm lint
+pnpm test
+pnpm build
+pnpm db:start
+pnpm --filter @koty-app/api test:integration
+OPENSPEC_TELEMETRY=0 pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
 ```
 
-Este comando ejecuta lint, typecheck de los paquetes que lo declaran, Vitest,
-pruebas shell, builds, pytest y validacion estricta de OpenSpec, en ese orden.
+La puerta `integration` inicia PostgreSQL con `pnpm db:start` y despues ejecuta
+la suite de integracion de la API; deten PostgreSQL con `pnpm db:stop` cuando
+ya no se necesite. `pnpm verify` es una verificacion completa separada para el
+desarrollo del repositorio: no sustituye esta secuencia de puertas ni ejecuta la
+puerta `integration`.
 
-Si cualquiera falla, el Programmer debe corregir el problema antes de finalizar.
+Si una puerta o una revision recuperable falla, el supervisor crea un
+RepairPack y vuelve solo a Programmer con sus rutas de evidencia. Analyst y
+Architect no se vuelven a invocar mientras TicketContract y PlanManifest sigan
+vigentes.
 
 ---
 
@@ -862,14 +935,15 @@ testing_task
 review_task
 ```
 
-En la ejecucion supervisada el flujo se divide en dos crews secuenciales:
+En la ejecucion supervisada cada rol se ejecuta como un CrewAI de una sola
+tarea dentro de una maquina de fases persistente:
 
 ```text
-planning_crew
-  analyst -> arquitect
-       ↓
-delivery_crew
-  programer -> tester -> reviewer
+planning: analyst -> architect -> OpenSpec preflight
+implementing: programmer
+verifying: puertas base
+browser_testing: tester solo para perfiles de navegador
+reviewing: reviewer
 ```
 
 ---
@@ -903,15 +977,13 @@ Recibe:
 <ticket-activo>
 ```
 
-normaliza el identificador. En la ejecucion supervisada ejecuta primero
-`planning_crew` (analyst y arquitect) y luego `delivery_crew` (programer,
-tester y reviewer); las ejecuciones antiguas pueden usar `crew()` como flujo
-unico. El resultado estructurado se guarda en `result.json` dentro del cambio
-OpenSpec activo.
+normaliza el identificador y ejecuta la fase persistida. `--resume` conserva
+la fase y los contratos actuales; `--replan` es la unica invalidacion manual
+de planificacion y conserva evidencia de intentos anteriores. El resultado
+estructurado se guarda en `result.json` dentro del cambio OpenSpec activo.
 
 ```python
-KotyAppCrew().planning_crew().kickoff(...)
-KotyAppCrew().delivery_crew().kickoff(...)
+run_ticket(ticket_id, change_id, state)
 ```
 
 ---
@@ -1021,7 +1093,8 @@ Solo cuando todas las verificaciones sean correctas:
 OPENSPEC_TELEMETRY=0 pnpm exec openspec archive "$CHANGE_ID_ACTIVO" --yes
 ```
 
-Normalmente este último paso debe realizarlo el Reviewer automáticamente.
+La aprobacion del Reviewer permite que Ralph y `finalize_ticket` realicen la
+finalizacion local; el Reviewer no archiva ni completa tickets por su cuenta.
 
 ---
 
@@ -1081,19 +1154,22 @@ OpenSpec $CHANGE_ID_ACTIVO
         ▼
 Senior Software Developer
         │
-        ├── implementación
+        └── implementacion
+        │
+        ▼
+Puertas base
         ├── python
         ├── lint
         ├── test
-        └── build
+        ├── build
+        ├── integration
+        └── OpenSpec validate estricto
+        │
+        ▼
+Tester (solo perfiles browser)
         │
         ▼
 Quality Reviewer
-        │
-        ├── revisión funcional
-        ├── revisión técnica
-        ├── validaciones
-        └── OpenSpec validate
         │
         ▼
 OpenSpec archive

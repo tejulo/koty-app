@@ -13,6 +13,7 @@ MAX_ITERATIONS=10
 ONCE=false
 UNTIL_FINALIZED=false
 RESUME=false
+REPLAN=false
 MAX_ITERATIONS_SET=false
 RUNTIME_AGENT="opencode"
 
@@ -42,7 +43,10 @@ Options:
       Repeat the first selected ticket until it is finalized.
 
   --resume
-      Start a new CrewAI execution for the selected ticket.
+       Start a new CrewAI execution for the selected ticket.
+
+   --replan
+       Invalidate persisted planning contracts for the selected ticket.
 
   -a, --agent opencode
       Runtime agent. Only opencode is supported.
@@ -103,6 +107,11 @@ while (($#)); do
       shift
       ;;
 
+    --replan)
+      REPLAN=true
+      shift
+      ;;
+
     -a|--agent)
       [[ $# -ge 2 ]] || die "$1 requiere un valor"
       RUNTIME_AGENT="$2"
@@ -157,6 +166,9 @@ done
 [[ "$MAX_ITERATIONS" =~ ^[1-9][0-9]*$ ]] \
   || die "MAX_ITERATIONS debe ser mayor que 0"
 
+$RESUME && $REPLAN \
+  && die "--resume y --replan no se pueden combinar"
+
 if $ONCE; then
   MAX_ITERATIONS=1
 fi
@@ -168,6 +180,9 @@ fi
 if $UNTIL_FINALIZED; then
   if $RESUME; then
     exec "$ROOT/scripts/coordinate-crew-ticket.sh" --resume
+  fi
+  if $REPLAN; then
+    exec "$ROOT/scripts/coordinate-crew-ticket.sh" --replan
   fi
   exec "$ROOT/scripts/coordinate-crew-ticket.sh"
 fi

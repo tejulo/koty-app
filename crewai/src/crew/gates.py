@@ -3,6 +3,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from .evidence import record_active_gate_execution
 from .integration_env import environment
@@ -18,6 +19,7 @@ class GateRun:
     passed: bool
     evidence_id: str | None
     output: str
+    failure_kind: Literal["ticket", "infrastructure"] = "ticket"
 
 
 def _run(
@@ -52,7 +54,7 @@ def run_gate(name: str, change_id: str) -> GateRun:
         code, output = _run(bootstrap, PROJECT_ROOT, environment(PROJECT_ROOT))
         if code:
             evidence_id = record_active_gate_execution(name, bootstrap, PROJECT_ROOT, code, output)
-            return GateRun(name, False, evidence_id, output)
+            return GateRun(name, False, evidence_id, output, "infrastructure")
         command = ["pnpm", "--filter", "@koty-app/api", "test:integration"]
         cwd = PROJECT_ROOT
         env = environment(PROJECT_ROOT)
