@@ -12,7 +12,7 @@ import requests
 from crewai.tools import tool
 from crewai.tools.tool_failure import ToolFailure
 
-from ..evidence import record_active_gate_execution
+from ..evidence import load_attempt_evidence, record_active_gate_execution
 from ..integration_env import environment
 from ..linear_api import get_issue
 
@@ -21,8 +21,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 CREWAI_ROOT = Path(__file__).resolve().parents[3]
 
 MAX_FILES = 120
-MAX_FILE_CHARS = 20_000
-MAX_COMMAND_CHARS = 12_000
+MAX_FILE_CHARS = 12_000
+MAX_COMMAND_CHARS = 4_000
 MAX_DEPTH = 4
 
 IGNORED_DIRS = {
@@ -59,13 +59,44 @@ def _truncate(
     if len(text) <= limit:
         return text
 
-    head = limit // 3
+    marker = "\n\n...[TRUNCADO]...\n\n"
+    retained = limit - len(marker)
+    head = retained // 3
 
     return (
         text[:head]
-        + "\n\n...[TRUNCADO]...\n\n"
-        + text[-(limit - head):]
+        + marker
+        + text[-(retained - head):]
     )
+
+
+def _evidence_suffix(
+    gate: str,
+    command: list[str],
+    cwd: Path,
+    exit_code: int,
+    output: str,
+) -> str:
+    evidence_id = record_active_gate_execution(gate, command, cwd, exit_code, output)
+    return f"\n\nEvidence: {_evidence_reference(evidence_id)}" if evidence_id else ""
+
+
+def _bounded_command_response(prefix: str, output: str, suffix: str = "") -> str:
+    available = max(MAX_COMMAND_CHARS - len(prefix) - len(suffix) - 2, 0)
+    return f"{prefix}\n\n{_truncate(output, available)}{suffix}"
+
+
+def _evidence_reference(evidence_id: str) -> str:
+    change_id = os.environ.get("CREW_VERIFICATION_CHANGE_ID")
+    attempt = os.environ.get("CREW_VERIFICATION_ATTEMPT")
+    if not change_id or not attempt:
+        return evidence_id
+    try:
+        executions = load_attempt_evidence(change_id, int(attempt))["executions"]
+        execution = next(item for item in executions if item["id"] == evidence_id)
+        return f"{evidence_id} ({execution['outputPath']})"
+    except (KeyError, StopIteration, ValueError):
+        return evidence_id
 
 
 def _resolve(relative: str) -> Path:
@@ -143,13 +174,7 @@ def _run(
         if part
     )
 
-    return (
-        result.returncode,
-        _truncate(
-            output,
-            MAX_COMMAND_CHARS,
-        ),
-    )
+    return result.returncode, output
 
 
 @tool("Buscar Tarea en Linear")
@@ -159,15 +184,9 @@ def buscar_tarea_linear() -> str | ToolFailure:
     try:
         ticket_id = os.environ["CREW_TICKET_ID"]
         issue = get_issue(ticket_id)
-
-        return _truncate(
-            json.dumps(
-                issue,
-                ensure_ascii=False,
-                indent=2,
-            ),
-            MAX_FILE_CHARS,
-        )
+        output = json.dumps(issue, ensure_ascii=False, indent=2)
+        suffix = _evidence_suffix("linear", ["linear", ticket_id], PROJECT_ROOT, 0, output)
+        return _truncate(output, MAX_FILE_CHARS - len(suffix)) + suffix
 
     except Exception as error:
         return ToolFailure(
@@ -387,7 +406,7 @@ def ejecutar_openspec(
             else None
         )
         suffix = f"\n\nEvidence: {evidence_id}" if evidence_id else ""
-        return f"{prefix}\n\n{output}{suffix}"
+        return _bounded_command_response(prefix, output, suffix)
 
     except Exception as error:
         return f"Error: {error}"
@@ -452,15 +471,12 @@ def ejecutar_verificacion(
                 code,
                 output,
             )
-            suffix = (
-                f"\n\nEvidence: {evidence_id}"
-                if evidence_id
-                else ""
-            )
-            return (
+            suffix = f"\n\nEvidence: {_evidence_reference(evidence_id)}" if evidence_id else ""
+            return _bounded_command_response(
                 "VERIFICACIÓN FALLIDA: integration\n\n"
-                "No se pudo iniciar la base de datos para integración.\n\n"
-                f"{output}{suffix}"
+                "No se pudo iniciar la base de datos para integración.",
+                output,
+                suffix,
             )
 
         command = [
@@ -493,7 +509,7 @@ def ejecutar_verificacion(
         output,
     )
     suffix = f"\n\nEvidence: {evidence_id}" if evidence_id else ""
-    return f"{prefix}: {name}\n\n{output}{suffix}"
+    return _bounded_command_response(f"{prefix}: {name}", output, suffix)
 
 
 PLAYWRIGHT_COMMANDS = {
@@ -575,8 +591,14 @@ def ejecutar_playwright(
             if code == 0
             else "PLAYWRIGHT ERROR"
         )
-
-        return f"{prefix}\n\n{output}"
+        suffix = _evidence_suffix(
+            "playwright",
+            ["playwright-cli", *args],
+            PROJECT_ROOT,
+            code,
+            output,
+        )
+        return _bounded_command_response(prefix, output, suffix)
 
     except Exception as error:
         return (

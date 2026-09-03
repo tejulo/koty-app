@@ -1,179 +1,54 @@
 analysis_task:
   description: >
     Usa obligatoriamente 'Buscar Tarea en Linear'
-    para obtener '{ticket_id}'.
+    para obtener '{ticket_id}'. El supervisor calculó el hash SHA-256 del
+    ticket serializado: '{ticket_sha256}'. El contrato debe usar exactamente
+    ticket_id='{ticket_id}', change_id='{change_id}' y ese ticket_sha256.
 
-    El orquestador ya debió mover el ticket a In Progress.
-
-    Analiza:
-    - objetivo;
-    - alcance;
-    - requisitos funcionales;
-    - criterios de aceptación;
-    - restricciones;
-    - dependencias;
-    - ambigüedades.
-
-    No inventes información.
-
-    Si el ticket no puede recuperarse o contiene una
-    ambigüedad que impide implementarlo, indícalo claramente.
+    Produce exclusivamente un TicketContract fiel al ticket, con objetivo,
+    alcance, criterios de aceptación con IDs AC-*, restricciones,
+    dependencias y ambigüedades. No inventes información.
   expected_output: >
-    Resumen conciso del ticket con objetivo, alcance,
-    requisitos, criterios de aceptación, restricciones
-    y ambigüedades.
+    Un TicketContract válido.
   agent: analyst
 
 
 architecture_task:
   description: >
-    Trabaja sobre el cambio OpenSpec '{change_id}'.
-
-    Lee CONTEXT.md.
-
-    Si '{last_attempt_path}' es distinto de 'NONE',
-    lee también ese archivo y considera el fallo documentado.
-
-    Si '{last_repair_diagnosis_path}' es distinto de 'NONE',
-    lee ese diagnóstico y aplica repairHint solo dentro de repairScope.
-
-    Inspecciona únicamente las partes relevantes del repositorio.
-
-    No inspecciones:
-    .venv, node_modules, .git, .next, dist, build,
-    __pycache__, .playwright-cli.
-
-    Crea o actualiza:
-    - openspec/changes/{change_id}/proposal.md
-    - openspec/changes/{change_id}/specs/
-    - openspec/changes/{change_id}/design.md
-    - openspec/changes/{change_id}/tasks.md
-
-    proposal define alcance.
-
-    specs define Requirements y Scenarios verificables.
-
-    design define las decisiones técnicas.
-
-    tasks usa checkboxes y debe indicar cambios concretos
-    y tests cuando correspondan.
-    Cada criterio de aceptación debe mapearse a una tarea
-    de este ticket. No declares fuera de alcance una
-    implementación exigida por el ticket.
-
-    design.md debe contener exactamente una estrategia:
-
-    ## Verification Strategy
-    - Browser E2E: required
-
-    o:
-
-    ## Verification Strategy
-    - Browser E2E: not_required
-
-    Incluye una razón breve.
-
-    Usa required cuando exista comportamiento verificable
-    mediante navegador: navegación, formularios,
-    autenticación, UI o integración frontend/API visible.
-
-    Nunca archives el cambio.
+    Lee el TicketContract persistido en '{ticket_contract_path}'.
+    Crea el PlanManifest para ese contrato en '{plan_manifest_path}', con los
+    valores exactos calculados por el supervisor: ticket_id='{ticket_id}',
+    change_id='{change_id}', ticket_sha256='{ticket_sha256}',
+    ticket_contract_sha256='{ticket_contract_sha256}',
+    verification_profile='{verification_profile}', base_gates='{base_gates}' y
+    openspec_artifact_hashes='{openspec_artifact_hashes}'. El manifiesto debe
+    usar esos hashes, perfil y gates exactamente, y mapear cada criterio AC-* a
+    tareas. Inspecciona y modifica únicamente los archivos necesarios para
+    producir esos artefactos.
   expected_output: >
-    Resumen de artifacts creados o actualizados.
+    Un PlanManifest válido.
   agent: arquitect
 
 
 coding_task:
   description: >
-    Implementa el cambio OpenSpec '{change_id}'.
-
-    Lee completamente:
-    - proposal.md
-    - design.md
-    - tasks.md
-    - todas las specs
-
-    Si '{last_attempt_path}' es distinto de 'NONE',
-    lee también el fallo anterior y corrige su causa.
-
-    Si '{last_evidence_path}' es distinto de 'NONE',
-    lee también esa evidencia. Si el hash de un archivo
-    diagnosticado ya no coincide, vuelve a ejecutar ese gate antes
-    de editar usando sus líneas o columnas.
-
-    Si '{last_repair_diagnosis_path}' es distinto de 'NONE',
-    lee ese JSON antes de corregir. Aplica repairHint y, si repairScope
-    no está vacío, escribe solo dentro de ese alcance. No debilites ni
-    saltees pruebas.
-
-    No debilites specs o criterios de aceptación para hacer
-    desaparecer un fallo.
-
-    Ejecuta tasks.md en orden.
-    No aceptes tareas que declaren fuera de alcance una
-    implementación exigida por el ticket; corrige el plan
-    y ejecútalo.
-
-    Antes de modificar un archivo existente debes leerlo.
-
-    Marca [x] únicamente después de completar realmente
-    la tarea.
-
-    Al finalizar ejecuta:
-    - python
-    - lint
-    - test
-    - build
-    - integration
-
-    Si una verificación falla por la implementación,
-    corrige el problema y vuelve a ejecutarla.
-
-    No archives OpenSpec y no modifiques Linear.
+    Lee el PlanManifest persistido en '{plan_manifest_path}' e implementa solo
+    las tareas que mapea. Si '{repair_pack_path}' no es 'NONE', lee ese
+    RepairPack y aplica su hint solo dentro de su scope. No ejecutes gates
+    autoritativos ni modifiques los artefactos OpenSpec planificados: el
+    supervisor conserva la responsabilidad y persiste TaskCompletion con el
+    hash original de tasks.md después de una implementación exitosa.
   expected_output: >
-    Archivos modificados, tareas completadas y resultado
-    de python, lint, test, build e integration.
+    Archivos modificados, tareas completadas y estado conciso.
   agent: programer
 
 
 testing_task:
   description: >
-    Lee design.md y todas las specs de '{change_id}'.
-
-    Si design.md contiene:
-
-    Browser E2E: not_required
-
-    no abras navegador y devuelve status=skipped.
-
-    Si contiene:
-
-    Browser E2E: required
-
-    ejecuta este flujo:
-
-    1. Usa 'Gestionar Entorno Local' con start.
-    2. Obtén la URL devuelta.
-    3. Usa 'Ejecutar Playwright' con open y esa URL.
-    4. Usa snapshot --raw para inspeccionar la página.
-    5. Ejecuta únicamente los Scenarios relevantes.
-    6. Usa las verificaciones de Playwright cuando sea posible.
-    7. Consulta console error o network cuando un fallo
-       necesite diagnóstico.
-    8. Cierra Playwright.
-    9. Detén el entorno local.
-
-    No uses MCP.
-    No uses skills.
-    No modifiques código.
-
-    Si un Scenario falla:
-    status=failed.
-
-    Si todos pasan:
-    status=passed.
-
-    Nunca inventes un resultado.
+    Lee el perfil de verificación persistido en '{verification_profile_path}'
+    y los escenarios persistidos en '{scenario_paths}'. Ejecuta solo los
+    escenarios indicados cuando el perfil requiera Browser E2E; de otro modo
+    devuelve status=skipped. No modifiques código ni inventes resultados.
   expected_output: >
     Resultado estructurado con status, summary y scenarios.
   agent: tester
@@ -181,57 +56,10 @@ testing_task:
 
 review_task:
   description: >
-    Realiza la revisión final de '{change_id}'.
-
-    Lee:
-    - proposal.md
-    - design.md
-    - tasks.md
-    - todas las specs
-    - código relevante
-
-    Comprueba:
-    - todos los Requirements implementados;
-    - todos los Scenarios cubiertos;
-    - design respetado;
-    - todas las tasks marcadas [x].
-
-    Si '{last_repair_diagnosis_path}' es distinto de 'NONE',
-    lee ese JSON. Si repairScope no está vacío, acepta cambios solo
-    dentro de ese alcance y exige que el gate fallido vuelva a pasar
-    sin saltear pruebas.
-
-    Rechaza como retryable_failure un plan que declare
-    fuera de alcance un criterio de aceptación.
-
-    Considera también el resultado real del Tester.
-
-    Si Browser E2E es required,
-    Playwright debe estar passed.
-
-    Si Browser E2E es not_required,
-    Playwright puede estar skipped.
-
-    Usa status=approved únicamente si todo es correcto.
-
-    Usa status=retryable_failure cuando otra ejecución
-    del Crew puede corregir el problema.
-
-    Usa status=blocked cuando se requiere intervención humana
-    por requisitos, configuración o dependencia externa.
-
-    failure_type debe ser uno de:
-    none
-    implementation
-    test
-    infrastructure
-    configuration
-    requirements
-    max_attempts
-
-    Devuelve un único objeto JSON sin razonamiento ni markdown.
-    Nunca archives OpenSpec.
-    Nunca modifiques Linear.
+    Lee el ReviewPack persistido en '{review_pack_path}' y revisa únicamente
+    los archivos y la evidencia que referencia. Devuelve approved solo si el
+    pack sustenta cada criterio de aceptación; usa retryable_failure cuando
+    Programmer puede corregirlo o blocked si requiere intervención humana.
   expected_output: >
     Resultado estructurado con ticket_id, change_id, status,
     failure_type, failure_stage y summary.

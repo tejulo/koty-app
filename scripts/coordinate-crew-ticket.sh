@@ -6,9 +6,19 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 export CREW_TICKET_WAIT_SECONDS="${CREW_TICKET_WAIT_SECONDS:-30}"
 RETRY_DELAY_SECONDS="${CREW_RETRY_DELAY_SECONDS:-5}"
 RESUME=false
+REPLAN=false
 
-if [[ "${1:-}" == "--resume" ]]; then
-  RESUME=true
+for option in "$@"; do
+  case "$option" in
+    --resume) RESUME=true ;;
+    --replan) REPLAN=true ;;
+    *) printf 'Opción desconocida: %s\n' "$option" >&2; exit 1 ;;
+  esac
+done
+
+if $RESUME && $REPLAN; then
+  printf '%s\n' '--resume y --replan no se pueden combinar' >&2
+  exit 1
 fi
 
 json_field() {
@@ -79,7 +89,7 @@ while true; do
       exit 0
       ;;
     blocked)
-      $RESUME || block "$(printf '%s' "$finalization" | json_field reason)"
+      $RESUME || $REPLAN || block "$(printf '%s' "$finalization" | json_field reason)"
       ;;
     retry)
       sleep "$RETRY_DELAY_SECONDS"
@@ -97,19 +107,23 @@ while true; do
   if $RESUME; then
     worker_args+=(--resume)
   fi
+  if $REPLAN; then
+    worker_args+=(--replan)
+  fi
   worker="$("$ROOT/scripts/run-crew-ticket.sh" "${worker_args[@]}")"
   worker_status="$(printf '%s' "$worker" | json_field status)"
   worker_started="$(printf '%s' "$worker" | json_field started)"
 
   if [[ "$worker_started" == "True" ]]; then
     RESUME=false
+    REPLAN=false
   fi
 
   case "$worker_status" in
     approved|archived|running)
       ;;
     blocked)
-      $RESUME || block "$(printf '%s' "$worker" | json_field summary)"
+      $RESUME || $REPLAN || block "$(printf '%s' "$worker" | json_field summary)"
       ;;
     retry|retryable_failure)
       sleep "$RETRY_DELAY_SECONDS"

@@ -6,6 +6,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 TICKET_ID="${1:?Ticket requerido}"
 START=false
 RESUME=false
+REPLAN=false
 WAIT_SECONDS="${CREW_TICKET_WAIT_SECONDS:-600}"
 TIMEOUT_SECONDS="${CREW_TICKET_TIMEOUT_SECONDS:-1800}"
 STATE_DIR="$ROOT/.agent/crew/${TICKET_ID,,}"
@@ -24,12 +25,20 @@ for option in "$@"; do
     --resume)
       RESUME=true
       ;;
+    --replan)
+      REPLAN=true
+      ;;
     *)
       printf 'Opción desconocida: %s\n' "$option" >&2
       exit 1
       ;;
   esac
 done
+
+if $RESUME && $REPLAN; then
+  printf '%s\n' '--resume y --replan no se pueden combinar' >&2
+  exit 1
+fi
 
 mkdir -p "$STATE_DIR"
 started=false
@@ -60,7 +69,7 @@ blocked() {
     && [[ "$(python -c 'import json, sys; print(json.load(sys.stdin).get("status", ""))' <"$RESULT_FILE")" == "blocked" ]]
 }
 
-if $START && ! $RESUME && blocked; then
+if $START && ! $RESUME && ! $REPLAN && blocked; then
   result
   exit 0
 fi
@@ -74,6 +83,9 @@ if ! running && $START; then
 
   if $RESUME; then
     run_args+=(--resume)
+  fi
+  if $REPLAN; then
+    run_args+=(--replan)
   fi
 
   mkdir -p "$logs_dir"

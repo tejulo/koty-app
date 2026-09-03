@@ -23,6 +23,13 @@
 - Las pruebas de integracion de `apps/api` usan PostgreSQL real, migraciones y `DATABASE_URL`; no sustituyas Prisma por mocks en esa suite.
 - PostgreSQL local se administra con `pnpm db:start`, `pnpm db:status` y `pnpm db:stop`; el contenedor expone `localhost:5432`.
 
+## CrewAI por fases
+
+- La ejecucion de CrewAI persiste las fases `planning`, `implementing`, `verifying`, `browser_testing`, `reviewing`, `approved` y `blocked`; las reparaciones recuperables vuelven solo a Programmer.
+- Los perfiles validos son exclusivamente `standard`, `browser`, `operational` y `browser_operational`. `standard` no agrega evidencia; `browser` requiere Browser E2E aprobado; `operational` exige que ReviewPack relacione cada criterio operacional con un documento, prueba o artefacto fuente versionado y su hash; `browser_operational` exige ambas evidencias. Ningun perfil modifica las puertas base `python`, `lint`, `test`, `build`, `integration` y la validacion estricta de OpenSpec; Tester corre solo para perfiles de navegador.
+- `.agent/crew/<ticket>/execution.json` contiene estado de proceso no versionado. Los contratos, evidencia y metricas de tokens de cada invocacion de rol se retienen en `openspec/changes/<change-id>/attempts/<attempt>/`.
+- `--resume` continua una fase no terminal y contratos validos; no desbloquea `blocked`. Un cambio en el hash del ticket es la invalidacion automatica separada. `--replan` es la unica invalidacion manual de planificacion: reinicia `planning` de forma atomica incluso desde `blocked`, conserva la evidencia de intentos previos y vuelve a ejecutar el flujo, sin garantizar que desaparezca la causa subyacente del bloqueo.
+
 ## Prisma y OpenSpec
 
 - Las migraciones son explicitas: usa `pnpm db:migrate:dev --name <nombre>`, `pnpm db:migrate:deploy`, `pnpm db:migrate:status` y `pnpm db:verify`. La aplicacion no migra la base al arrancar.
