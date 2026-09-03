@@ -208,9 +208,7 @@ def test_role_tasks_accept_their_phase_contract_paths_and_authoritative_hashes(m
         "change_id",
         "ticket_sha256",
         "ticket_contract_sha256",
-        "verification_profile",
         "base_gates",
-        "openspec_artifact_hashes",
     }
     assert set(re.findall(r"{(.*?)}", crew.coding_task().description)) == {
         "plan_manifest_path",
