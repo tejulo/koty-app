@@ -24,8 +24,12 @@ architecture_task:
     ticket_id='{ticket_id}', change_id='{change_id}',
     ticket_sha256='{ticket_sha256}',
     ticket_contract_sha256='{ticket_contract_sha256}' y base_gates='{base_gates}'.
-    El manifiesto debe calcular los hashes actuales de los artefactos que creó,
-    usar el perfil de design.md y mapear cada criterio AC-* a tareas.
+    Los artefactos deben existir físicamente antes de responder. El manifiesto
+    debe usar exactamente esta forma:
+    {"artifacts": {"proposal.md": "<sha256>", "design.md": "<sha256>", "tasks.md": "<sha256>", "specs/<capability>/spec.md": "<sha256>"}, "acceptance_map": {"AC-001": ["T-001"]}}.
+    profile debe ser exactamente el verification_profile declarado en design.md.
+    artifacts contiene solo ruta: sha256 y acceptance_map solo AC-*: [task_id].
+    No uses objetos anidados ni alias como proposal, design, tasks o spec.
   expected_output: >
     Un PlanManifest válido.
   agent: arquitect

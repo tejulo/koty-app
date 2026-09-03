@@ -177,6 +177,21 @@ def test_tasks_bind_structured_contract_outputs(monkeypatch):
     assert crew.testing_task().output_pydantic is BrowserTesterResult
 
 
+def test_architecture_task_documents_flat_plan_manifest(monkeypatch):
+    configure_models(monkeypatch)
+    description = KotyAppCrew().architecture_task().description
+
+    assert '"proposal.md": "<sha256>"' in description
+    assert '"design.md": "<sha256>"' in description
+    assert '"tasks.md": "<sha256>"' in description
+    assert '"specs/<capability>/spec.md": "<sha256>"' in description
+    assert '"AC-001": ["T-001"]' in description
+    assert "profile debe ser exactamente el verification_profile declarado en design.md" in description
+    assert "No uses objetos anidados" in description
+    assert "proposal, design, tasks o spec" in description
+    assert "deben existir físicamente" in description
+
+
 def test_env_example_documents_all_role_token_defaults():
     env_example = Path(__file__).parents[1] / ".env.example"
     values = {
@@ -196,12 +211,12 @@ def test_role_tasks_accept_their_phase_contract_paths_and_authoritative_hashes(m
     configure_models(monkeypatch)
     crew = KotyAppCrew()
 
-    assert set(re.findall(r"{(.*?)}", crew.analysis_task().description)) == {
+    assert set(re.findall(r"{([A-Za-z_][A-Za-z0-9_-]*)}", crew.analysis_task().description)) == {
         "ticket_id",
         "change_id",
         "ticket_sha256",
     }
-    assert set(re.findall(r"{(.*?)}", crew.architecture_task().description)) == {
+    assert set(re.findall(r"{([A-Za-z_][A-Za-z0-9_-]*)}", crew.architecture_task().description)) == {
         "ticket_contract_path",
         "plan_manifest_path",
         "ticket_id",
@@ -210,15 +225,15 @@ def test_role_tasks_accept_their_phase_contract_paths_and_authoritative_hashes(m
         "ticket_contract_sha256",
         "base_gates",
     }
-    assert set(re.findall(r"{(.*?)}", crew.coding_task().description)) == {
+    assert set(re.findall(r"{([A-Za-z_][A-Za-z0-9_-]*)}", crew.coding_task().description)) == {
         "plan_manifest_path",
         "repair_pack_path",
     }
-    assert set(re.findall(r"{(.*?)}", crew.testing_task().description)) == {
+    assert set(re.findall(r"{([A-Za-z_][A-Za-z0-9_-]*)}", crew.testing_task().description)) == {
         "verification_profile_path",
         "scenario_paths",
     }
-    assert set(re.findall(r"{(.*?)}", crew.review_task().description)) == {
+    assert set(re.findall(r"{([A-Za-z_][A-Za-z0-9_-]*)}", crew.review_task().description)) == {
         "review_pack_path",
     }
 
