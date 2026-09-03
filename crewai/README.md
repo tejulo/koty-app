@@ -22,6 +22,8 @@ OpenSpec
   ↓
 Senior Software Developer
   ↓
+Tester
+  ↓
 Quality Reviewer
   ↓
 OpenSpec Archive
@@ -49,7 +51,8 @@ Las versiones del proyecto estan fijadas en `../.mise.toml`. Desde la raiz del m
 ./scripts/doctor.sh
 pnpm verify
 cd crewai
-uv run run_crew DEV-5
+export TICKET_ACTIVO=DEV-123
+uv run run_crew "$TICKET_ACTIVO"
 ```
 
 ### PowerShell 5.1 o 7 (Windows)
@@ -61,7 +64,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 pnpm verify
 Set-Location crewai
-uv run run_crew DEV-5
+$env:TICKET_ACTIVO = 'DEV-123'
+uv run run_crew $env:TICKET_ACTIVO
 ```
 
 En PowerShell 7, sustituye `powershell.exe` por `pwsh` en ambos comandos.
@@ -76,7 +80,7 @@ Como alternativa sin modificar el shell, usa la ruta resuelta que muestra el boo
 
 ```bash
 "$HOME/.local/bin/mise" exec -- pnpm verify
-"$HOME/.local/bin/mise" exec -- uv run --project crewai run_crew DEV-5
+"$HOME/.local/bin/mise" exec -- uv run --project crewai run_crew "$TICKET_ACTIVO"
 ```
 
 Si `mise` ya existia en otra ruta, reemplaza `"$HOME/.local/bin/mise"` por la ruta impresa. La forma general es `mise exec -- <comando>`.
@@ -153,6 +157,11 @@ Ejemplo:
 
 ```env
 LINEAR_API_KEY=
+LINEAR_QUEUE_ASSIGNEE_EMAIL=
+LINEAR_QUEUE_MILESTONE=
+
+MAX_TICKET_ATTEMPTS=3
+MAX_INFRASTRUCTURE_ATTEMPTS=2
 
 OPENCODE_API_KEY=
 
@@ -161,6 +170,7 @@ ZEN_BASE_URL=https://opencode.ai/zen/go/v1
 ZEN_ANALYST_MODEL=
 ZEN_ARCHITECT_MODEL=
 ZEN_CODER_MODEL=
+ZEN_TESTER_MODEL=
 ZEN_REVIEWER_MODEL=
 
 CREWAI_TRACING_ENABLED=false
@@ -195,6 +205,7 @@ Cada agente puede utilizar un modelo diferente:
 ZEN_ANALYST_MODEL=
 ZEN_ARCHITECT_MODEL=
 ZEN_CODER_MODEL=
+ZEN_TESTER_MODEL=
 ZEN_REVIEWER_MODEL=
 ```
 
@@ -216,7 +227,9 @@ ejecutar:
 uv run run_crew "$TICKET_ACTIVO"
 ```
 
-El programa normaliza el identificador. `DEV-5` y `dev-5` sirven para verificar esa normalizacion, pero no para una ejecucion que cambie artefactos porque el cambio ya esta archivado.
+El programa normaliza el identificador. Usa un ticket activo para cualquier
+ejecucion que pueda crear o modificar artefactos; `DEV-5` solo sirve para
+verificar la normalizacion porque su cambio ya esta archivado.
 
 Por ejemplo:
 
@@ -235,6 +248,36 @@ Para trabajo real, reemplaza el ejemplo por el identificador de un ticket activo
 
 ---
 
+# Ejecución supervisada por Ralph
+
+Para ejecutar CrewAI desde el supervisor local, usa desde la raíz:
+
+```bash
+./ralph.sh --until-finalized
+```
+
+Este modo no invoca OpenCode. `scripts/coordinate-crew-ticket.sh` selecciona un ticket mediante `crew_queue next`, cambia o crea su branch, inicia Linear, ejecuta `scripts/run-crew-ticket.sh` y reintenta la finalización hasta obtener `done`, `blocked` o un error no recuperable.
+
+Configura `LINEAR_QUEUE_ASSIGNEE_EMAIL` y `LINEAR_QUEUE_MILESTONE` en `crewai/.env`; ambos son necesarios para `crew_queue next`. Usa `./ralph.sh --until-finalized --resume` para crear una nueva ejecución CrewAI después de un resultado bloqueado.
+
+El coordinador sondea cada 30 segundos por defecto (`CREW_TICKET_WAIT_SECONDS`) y espera 5 segundos entre reintentos (`CREW_RETRY_DELAY_SECONDS`). El runner cancela una ejecución después de 1800 segundos (`CREW_TICKET_TIMEOUT_SECONDS`) y conserva estado, logs y resultados bajo `.agent/crew/<ticket>/`; esos artefactos no se versionan.
+
+Estados JSON relevantes:
+
+* `crew_queue`: `empty`, `blocked`, `ticket`, `retry`.
+* `run-crew-ticket.sh`: `running`, `approved`, `archived`, `retry`, `retryable_failure`, `blocked`.
+* `finalize_ticket`: `done`, `not_ready`, `repair`, `retry`, `blocked`.
+
+Pruebas focalizadas:
+
+```bash
+bash scripts/tests/run-crew-ticket.test.sh
+bash scripts/tests/ralph.test.sh
+pnpm test:shell
+```
+
+---
+
 # Ejecutar sin argumento
 
 También puede ejecutarse:
@@ -246,7 +289,7 @@ uv run run_crew
 El programa solicitará:
 
 ```text
-Ingresa el identificador de un ticket activo:
+Ticket:
 ```
 
 ---
@@ -461,7 +504,8 @@ Antes de finalizar, desde la raiz se ejecuta la puerta completa:
 pnpm verify
 ```
 
-Este comando incluye lint, Vitest, pruebas shell, builds, pytest y validacion estricta de OpenSpec.
+Este comando ejecuta lint, typecheck de los paquetes que lo declaran, Vitest,
+pruebas shell, builds, pytest y validacion estricta de OpenSpec, en ese orden.
 
 Si cualquiera falla, el Programmer debe corregir el problema antes de finalizar.
 
@@ -492,11 +536,11 @@ y comprobar:
 * tests correctos
 * build correcto
 
-Después ejecuta:
-
-```bash
-OPENSPEC_TELEMETRY=0 pnpm exec openspec validate "$CHANGE_ID_ACTIVO" --strict --no-interactive
-```
+En la ejecución supervisada, el Reviewer devuelve un `ReviewVerdict`
+estructurado. `main.py` ejecuta las puertas autoritativas y valida que el
+resultado cite evidencia vigente para `python`, `lint`, `test`, `build`,
+`integration` y `openspec`; el resultado de Playwright depende de la estrategia
+`Browser E2E` del diseño.
 
 Si cualquier comprobación falla:
 
@@ -510,7 +554,7 @@ y el cambio no se archiva.
 
 # Archivado
 
-Solo cuando todas las verificaciones son correctas, el Reviewer ejecuta:
+Solo cuando todas las verificaciones son correctas, `finalize_ticket` ejecuta:
 
 ```bash
 OPENSPEC_TELEMETRY=0 pnpm exec openspec archive "$CHANGE_ID_ACTIVO" --yes
@@ -524,7 +568,9 @@ El parámetro:
 
 es necesario porque CrewAI ejecuta OpenSpec sin interacción manual.
 
-Una vez archivado, el cambio deja de estar activo.
+Después valida todos los cambios OpenSpec, crea el commit sin incluir `.agent/`
+y completa el ticket en Linear. El Reviewer no archiva ni completa tickets por
+su cuenta.
 
 ---
 
@@ -649,19 +695,18 @@ No devuelve nuevamente el contenido escrito para evitar duplicarlo dentro del co
 
 ## Ejecutar OpenSpec
 
-Permite comandos OpenSpec controlados como:
+La tool permite únicamente operaciones controladas y no destructivas:
 
 ```text
-new
-status
-validate
-archive
 list
-show
-instructions
+show <change-id>
+status --change <change-id>
+validate --all --strict
+validate <change-id> --strict --no-interactive
 ```
 
-Se ejecutan siempre desde la raíz del repositorio.
+Se ejecutan siempre desde la raíz del repositorio. La creación y el archivado
+son responsabilidad de `main.py` y `finalize_ticket`, no de esta tool.
 
 ---
 
@@ -674,9 +719,12 @@ python
 lint
 test
 build
+integration
 ```
 
-No permite ejecutar comandos arbitrarios enviados por el LLM.
+`integration` inicia PostgreSQL y ejecuta la suite de `apps/api`; detén el
+contenedor con `pnpm db:stop` cuando ya no lo necesites. No permite ejecutar
+comandos arbitrarios enviados por el LLM.
 
 ---
 
@@ -761,6 +809,13 @@ crewai/
         ├── __init__.py
         ├── main.py
         ├── crew.py
+        ├── queue.py
+        ├── finalizer.py
+        ├── models.py
+        ├── evidence.py
+        ├── gates.py
+        ├── integration_env.py
+        ├── linear_api.py
         │
         ├── config/
         │   ├── agents.yaml
@@ -781,6 +836,7 @@ Define los agentes:
 analyst
 arquitect
 programer
+tester
 reviewer
 ```
 
@@ -802,19 +858,18 @@ Define el pipeline:
 analysis_task
 architecture_task
 coding_task
+testing_task
 review_task
 ```
 
-El proceso es secuencial:
+En la ejecucion supervisada el flujo se divide en dos crews secuenciales:
 
 ```text
-analysis_task
-      ↓
-architecture_task
-      ↓
-coding_task
-      ↓
-review_task
+planning_crew
+  analyst -> arquitect
+       ↓
+delivery_crew
+  programer -> tester -> reviewer
 ```
 
 ---
@@ -845,13 +900,18 @@ Es el entrypoint de la aplicación.
 Recibe:
 
 ```text
-dev-5
+<ticket-activo>
 ```
 
-normaliza el identificador y ejecuta:
+normaliza el identificador. En la ejecucion supervisada ejecuta primero
+`planning_crew` (analyst y arquitect) y luego `delivery_crew` (programer,
+tester y reviewer); las ejecuciones antiguas pueden usar `crew()` como flujo
+unico. El resultado estructurado se guarda en `result.json` dentro del cambio
+OpenSpec activo.
 
 ```python
-KotyAppCrew().crew().kickoff(...)
+KotyAppCrew().planning_crew().kickoff(...)
+KotyAppCrew().delivery_crew().kickoff(...)
 ```
 
 ---
@@ -983,10 +1043,12 @@ Preparar, completar credenciales, diagnosticar y verificar en Bash (Linux, macOS
 ./scripts/doctor.sh
 pnpm verify
 cd crewai
-uv run run_crew DEV-5
+export TICKET_ACTIVO=DEV-123
+uv run run_crew "$TICKET_ACTIVO"
 ```
 
-El ultimo comando muestra el formato del entrypoint. Para una ejecucion que cambie artefactos, usa un ticket activo en lugar de `DEV-5`.
+El ultimo comando ejecuta un ticket activo de ejemplo; reemplaza `DEV-123` por
+el identificador real antes de ejecutar el flujo.
 
 En Windows, usa el bloque PowerShell de requisitos al inicio de este documento.
 

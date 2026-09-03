@@ -126,7 +126,7 @@ if $UNTIL_FINALIZED; then
 fi
 ```
 
-This leaves ordinary Ralph iterations unchanged and lets deterministic mode keep the runner's `600`-second default instead of forcing `30` seconds.
+This leaves ordinary Ralph iterations unchanged. Deterministic mode uses the coordinator's `30`-second polling default; the runner's direct default remains `600` seconds when `CREW_TICKET_WAIT_SECONDS` is unset outside the coordinator.
 
 - [ ] **Step 5: Run the regression test**
 

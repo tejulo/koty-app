@@ -6,16 +6,16 @@ La especificacion funcional y tecnica del producto esta en [`CONTEXT.md`](./CONT
 
 ## Estado Actual
 
-El repositorio se encuentra antes de la implementacion funcional del incremento 0.
+El repositorio contiene el scaffolding y parte de la infraestructura del incremento 0; el dominio funcional completo aun no esta implementado.
 
 | Componente | Estado actual |
 | --- | --- |
 | Web | Next.js 16 con App Router, Tailwind CSS y una pagina inicial estatica. |
-| API | NestJS 11 con `GET /` y `GET /health`; aun sin prefijo `/api/v1`, OpenAPI ni modulos de dominio. |
+| API | NestJS 11 con prefijo `api/v1` por defecto, health checks, OpenAPI/Swagger y modulos de infraestructura; aun sin el dominio funcional completo. |
 | Worker | Scaffolding TypeScript con entrypoint ejecutable y cierre controlado por senales. |
 | Contratos compartidos | Tipos TypeScript basicos; todavia no contiene esquemas Zod. |
 | Configuracion compartida | Presets de TypeScript y ESLint. |
-| Persistencia | PostgreSQL, Prisma, migraciones y Docker Compose todavia no estan incorporados. |
+| Persistencia | PostgreSQL 17 en Docker Compose, Prisma y migraciones versionadas bajo `apps/api/prisma/migrations/`. |
 | Pruebas | Vitest, pruebas shell del bootstrap, pytest y validacion estricta de OpenSpec integrados en `pnpm verify`. |
 
 Autenticacion, organizaciones, permisos, auditoria, outbox, jobs persistentes y el resto del dominio forman parte de los incrementos definidos en `CONTEXT.md`.
@@ -66,7 +66,8 @@ Desde la raiz del repositorio, elige el flujo de tu shell.
 ./scripts/doctor.sh
 pnpm verify
 cd crewai
-uv run run_crew DEV-5
+export TICKET_ACTIVO=DEV-123
+uv run run_crew "$TICKET_ACTIVO"
 ```
 
 ### PowerShell 5.1 o 7 (Windows)
@@ -78,7 +79,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 pnpm verify
 Set-Location crewai
-uv run run_crew DEV-5
+$env:TICKET_ACTIVO = 'DEV-123'
+uv run run_crew $env:TICKET_ACTIVO
 ```
 
 En PowerShell 7, sustituye `powershell.exe` por `pwsh` en ambos comandos.
@@ -93,23 +95,23 @@ Si prefieres no modificar la configuracion del shell, usa la ruta de `mise` que 
 
 ```bash
 "$HOME/.local/bin/mise" exec -- pnpm verify
-"$HOME/.local/bin/mise" exec -- uv run --project crewai run_crew DEV-5
+"$HOME/.local/bin/mise" exec -- uv run --project crewai run_crew DEV-123
 ```
 
 En PowerShell, la alternativa sin modificar el perfil es:
 
 ```powershell
 & (Get-Command mise).Source exec -- pnpm verify
-& (Get-Command mise).Source exec -- uv run --project crewai run_crew DEV-5
+& (Get-Command mise).Source exec -- uv run --project crewai run_crew DEV-123
 ```
 
 Si `mise` ya estaba instalado en otra ruta, sustituye `"$HOME/.local/bin/mise"` por la ruta resuelta que aparece en la salida. La forma general de la alternativa es `mise exec -- <comando>`.
 
 No se activa manualmente `crewai/.venv`: `uv run` selecciona el entorno sincronizado. OpenSpec es una dependencia local del workspace y se invoca con `OPENSPEC_TELEMETRY=0 pnpm exec openspec`; no se instala globalmente.
 
-`DEV-5` esta archivado en OpenSpec. El comando anterior documenta la forma del entrypoint; toda ejecucion que pueda crear, modificar o archivar artefactos debe sustituirlo por un ticket activo.
+Reemplaza `DEV-123` por un ticket activo antes de ejecutar el CrewAI. `DEV-5` esta archivado en OpenSpec y no debe usarse para crear, modificar o archivar artefactos.
 
-Actualmente el archivo `.env.example` de la raiz documenta variables previstas, pero las aplicaciones Node no cargan de forma uniforme un `.env.local` raiz. En particular, la API necesita recibir `PORT` desde el entorno para no competir con la web por el puerto 3000.
+El desarrollo de API y worker carga explícitamente el `.env` raíz mediante `node --env-file`; los comandos compilados `start` requieren que las variables ya estén exportadas. La API valida `DATABASE_URL` antes de arrancar.
 
 ## Desarrollo Local
 
@@ -144,7 +146,7 @@ El script raiz existe:
 pnpm dev
 ```
 
-Ejecuta en paralelo todos los scripts `dev` del workspace. Web y API intentan usar el puerto 3000 si `PORT` no se exporta, por lo que conviene iniciar la API con un puerto explicito.
+Ejecuta en paralelo todos los scripts `dev` del workspace. La web usa el puerto 3000 y la API usa 3001 por defecto; define `PORT` explícitamente si el entorno ya tiene servicios ocupando esos puertos.
 
 ## Scripts Node
 
@@ -156,15 +158,19 @@ Los siguientes scripts existen en el `package.json` raiz:
 | `pnpm build` | Compila recursivamente los paquetes que definen `build`. |
 | `pnpm lint` | Ejecuta lint recursivamente en modo de solo lectura. |
 | `pnpm test` | Ejecuta la suite Vitest. |
-| `pnpm test:shell` | Ejecuta las pruebas de bootstrap y doctor: Bash en Unix y PowerShell en Windows. |
+| `pnpm test:shell` | Ejecuta las pruebas de bootstrap, runner supervisado y Ralph: Bash en Unix y PowerShell en Windows. |
 | `pnpm crew:check` | Ejecuta pytest y la validacion estricta de OpenSpec. |
 | `pnpm verify` | Ejecuta lint, todas las pruebas, builds y verificaciones de CrewAI/OpenSpec. |
 | `pnpm clean` | Elimina artefactos generados mediante los scripts de cada paquete. |
 | `pnpm start:web` | Inicia un build previo de Next.js. |
 | `pnpm start:api` | Inicia el artefacto compilado de la API. |
 | `pnpm start:worker` | Inicia el artefacto compilado del worker. |
+| `pnpm db:start` / `pnpm db:stop` | Inicia o detiene PostgreSQL mediante Docker Compose. |
+| `pnpm db:migrate:dev --name <nombre>` | Crea y aplica una migración Prisma de desarrollo. |
+| `pnpm db:migrate:deploy` / `pnpm db:migrate:status` | Aplica o inspecciona migraciones versionadas. |
+| `pnpm db:verify` | Comprueba que el schema coincide con el historial de migraciones. |
 
-No existen todavia los scripts `format`, `db:start` ni `db:stop`.
+No existe un script `format` en la raíz.
 
 ## Paquetes Compartidos
 
@@ -175,6 +181,16 @@ Contiene por ahora tipos TypeScript basicos para respuestas API, paginacion y es
 ### `@koty-app/config`
 
 Exporta configuraciones compartidas de TypeScript y ESLint. Tailwind CSS permanece configurado dentro de `apps/web`.
+
+## Ralph
+
+`ralph.sh` es el supervisor local del flujo Linear -> CrewAI. El modo normal (`./ralph.sh`, `--once` o `--max-iterations N`) ejecuta OpenCode con el agente `.opencode/agents/ralph-linear.md` y registra logs en `.agent/history/`.
+
+`./ralph.sh --until-finalized` usa `scripts/coordinate-crew-ticket.sh` y no invoca OpenCode: selecciona un ticket con `crew_queue next`, asegura su branch, inicia el ticket, supervisa `run-crew-ticket.sh` y llama a `finalize_ticket` hasta obtener un estado terminal. Usa `--resume` para reintentar una ejecución bloqueada.
+
+Configura en `crewai/.env` `LINEAR_QUEUE_ASSIGNEE_EMAIL` y `LINEAR_QUEUE_MILESTONE` para que Ralph pueda seleccionar tickets. El coordinador espera 30 segundos entre sondeos por defecto (`CREW_TICKET_WAIT_SECONDS`) y reintenta después de 5 segundos (`CREW_RETRY_DELAY_SECONDS`); el worker tiene un timeout de 1800 segundos (`CREW_TICKET_TIMEOUT_SECONDS`).
+
+Prueba el supervisor con `bash scripts/tests/ralph.test.sh`; `pnpm test:shell` también ejecuta esa prueba. El estado y los logs del worker se guardan bajo `.agent/crew/<ticket>/`, que no debe versionarse.
 
 ## CrewAI
 
@@ -188,6 +204,7 @@ Configura en `crewai/.env` las claves y modelos requeridos por el archivo de eje
 - `ZEN_ANALYST_MODEL`
 - `ZEN_ARCHITECT_MODEL`
 - `ZEN_CODER_MODEL`
+- `ZEN_TESTER_MODEL`
 - `ZEN_REVIEWER_MODEL`
 
 Despues de activar `mise` con el bloque impreso por bootstrap y de que el doctor correspondiente (`./scripts/doctor.sh` o `scripts/doctor.ps1`) y `pnpm verify` finalicen correctamente, ejecutar un ticket activo:
@@ -233,9 +250,9 @@ Los identificadores de cambios activos usan kebab-case en minusculas. `DEV-5` ya
 
 ## Limitaciones Conocidas
 
-- El codigo presente es scaffolding y no implementa todavia el incremento 0.
-- No hay PostgreSQL local, Prisma, migraciones ni Docker Compose.
-- `pnpm format`, `pnpm db:start` y `pnpm db:stop` no existen.
+- El codigo presente es scaffolding y no implementa todavia el dominio funcional completo del incremento 0.
+- PostgreSQL local, Prisma, migraciones y Docker Compose existen para la infraestructura actual; las pruebas de integracion requieren Docker y `DATABASE_URL`.
+- `pnpm format` no existe en la raiz.
 - La estrategia de variables de entorno Node aun no esta unificada.
 - Los comandos `start` de produccion requieren revision antes de usarse para despliegue.
 

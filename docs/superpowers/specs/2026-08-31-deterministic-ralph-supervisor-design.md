@@ -41,7 +41,8 @@ The coordinator uses JSON results as the source of truth and polls only local pr
 
 ## Configuration
 
-- `CREW_TICKET_WAIT_SECONDS` retains its existing meaning and defaults to the runner default of `600` in deterministic mode.
+- `CREW_TICKET_WAIT_SECONDS` defaults to `30` in deterministic mode because `coordinate-crew-ticket.sh` sets the polling interval before invoking the runner.
+- `CREW_TICKET_TIMEOUT_SECONDS` defaults to `1800` in `run-crew-ticket.sh` and limits each supervised CrewAI process.
 - `CREW_RETRY_DELAY_SECONDS` defaults to `5` seconds and prevents immediate retries after a failed worker or finalization.
 
 ## Verification
