@@ -182,23 +182,6 @@ def _reset_for_planning(state: ExecutionState, ticket_sha256: str) -> ExecutionS
     return state
 
 
-def _open_spec_artifact_hashes(change_id: str) -> dict[str, str]:
-    change = active_change(change_id)
-    artifact_paths = {
-        path.relative_to(change).as_posix(): path
-        for path in [
-            change / "proposal.md",
-            change / "design.md",
-            change / "tasks.md",
-            *(change / "specs").rglob("*.md"),
-        ]
-    }
-    return {
-        name: workflow.file_sha256(path)
-        for name, path in artifact_paths.items()
-    }
-
-
 def _check_ticket(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
     ticket_sha256 = current_ticket_sha256(ticket_id)
     state.ticket_id = ticket_id
@@ -336,8 +319,6 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
         workflow.save_model(contract_path, contract)
 
         plan_path = workflow.plan_manifest_path(change_id, attempt)
-        profile = _selected_profile(change_id)
-        artifact_hashes = _open_spec_artifact_hashes(change_id)
         architect = kickoff_role(
             "architect",
             inputs={
@@ -347,13 +328,12 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
                 "change_id": change_id,
                 "ticket_sha256": ticket_sha256,
                 "ticket_contract_sha256": workflow.file_sha256(contract_path),
-                "verification_profile": profile,
                 "base_gates": ",".join(workflow.BASE_GATES),
-                "openspec_artifact_hashes": json.dumps(artifact_hashes, sort_keys=True),
             },
         )
         _record_usage(state, "architect", architect)
         manifest = _as_model(architect, PlanManifest)
+        profile = _selected_profile(change_id)
         artifact_paths = {name: active_change(change_id) / name for name in manifest.artifacts}
         workflow.validate_plan_manifest(
             manifest,

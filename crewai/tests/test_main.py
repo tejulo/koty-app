@@ -206,18 +206,9 @@ def test_verification_runs_each_immutable_gate_once_before_creating_repair_pack(
     assert pack.evidence_id == "lint-evidence"
 
 
-def test_planning_passes_only_declared_persisted_paths_to_each_role(tmp_path, monkeypatch):
+def test_planning_creates_artifacts_before_reading_the_profile(tmp_path, monkeypatch):
     monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
     change = tmp_path / "openspec/changes/dev-40"
-    for name, content in {
-        "proposal.md": "proposal",
-        "design.md": "verification_profile: operational",
-        "tasks.md": "tasks",
-        "specs/crew-supervision/spec.md": "spec",
-    }.items():
-        path = change / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
     calls = []
     monkeypatch.setattr(main, "current_ticket_sha256", lambda _: TICKET_HASH)
     monkeypatch.setattr(main, "_run_gate", lambda *_: GateRun("openspec", True, "open-evidence", ""))
@@ -226,7 +217,16 @@ def test_planning_passes_only_declared_persisted_paths_to_each_role(tmp_path, mo
         calls.append((role, inputs))
         if role == "analyst":
             return SimpleNamespace(pydantic=contract())
-        contract_path = tmp_path / calls[1][1]["ticket_contract_path"]
+        for name, content in {
+            "proposal.md": "proposal",
+            "design.md": "verification_profile: operational",
+            "tasks.md": "tasks",
+            "specs/crew-supervision/spec.md": "spec",
+        }.items():
+            path = change / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        contract_path = tmp_path / inputs["ticket_contract_path"]
         manifest = PlanManifest(
             ticket_id="DEV-40",
             change_id="dev-40",
@@ -254,24 +254,20 @@ def test_planning_passes_only_declared_persisted_paths_to_each_role(tmp_path, mo
             "ticket_sha256": TICKET_HASH,
         },
     )
-    assert calls[1][1]["ticket_contract_path"] == (
-        "openspec/changes/dev-40/attempts/1/ticket-contract.json"
+    assert calls[1] == (
+        "architect",
+        {
+            "ticket_contract_path": "openspec/changes/dev-40/attempts/1/ticket-contract.json",
+            "plan_manifest_path": "openspec/changes/dev-40/attempts/1/plan-manifest.json",
+            "ticket_id": "DEV-40",
+            "change_id": "dev-40",
+            "ticket_sha256": TICKET_HASH,
+            "ticket_contract_sha256": workflow.file_sha256(
+                tmp_path / "openspec/changes/dev-40/attempts/1/ticket-contract.json"
+            ),
+            "base_gates": ",".join(workflow.BASE_GATES),
+        },
     )
-    assert calls[1][1]["plan_manifest_path"] == (
-        "openspec/changes/dev-40/attempts/1/plan-manifest.json"
-    )
-    assert calls[1][1]["ticket_id"] == "DEV-40"
-    assert calls[1][1]["change_id"] == "dev-40"
-    assert calls[1][1]["ticket_sha256"] == TICKET_HASH
-    assert calls[1][1]["ticket_contract_sha256"] == workflow.file_sha256(
-        tmp_path / calls[1][1]["ticket_contract_path"]
-    )
-    assert calls[1][1]["verification_profile"] == "operational"
-    assert calls[1][1]["base_gates"] == ",".join(workflow.BASE_GATES)
-    assert json.loads(calls[1][1]["openspec_artifact_hashes"]) == {
-        name: workflow.file_sha256(change / name)
-        for name in ("proposal.md", "design.md", "tasks.md", "specs/crew-supervision/spec.md")
-    }
 
 
 def test_phase_usage_is_serializable_and_records_configured_limits(tmp_path, monkeypatch):

@@ -15,16 +15,17 @@ analysis_task:
 
 architecture_task:
   description: >
-    Lee el TicketContract persistido en '{ticket_contract_path}'.
-    Crea el PlanManifest para ese contrato en '{plan_manifest_path}', con los
-    valores exactos calculados por el supervisor: ticket_id='{ticket_id}',
-    change_id='{change_id}', ticket_sha256='{ticket_sha256}',
-    ticket_contract_sha256='{ticket_contract_sha256}',
-    verification_profile='{verification_profile}', base_gates='{base_gates}' y
-    openspec_artifact_hashes='{openspec_artifact_hashes}'. El manifiesto debe
-    usar esos hashes, perfil y gates exactamente, y mapear cada criterio AC-* a
-    tareas. Inspecciona y modifica únicamente los archivos necesarios para
-    producir esos artefactos.
+    Lee el TicketContract persistido en '{ticket_contract_path}'. Crea o
+    actualiza proposal.md, design.md, tasks.md y al menos una spec bajo
+    openspec/changes/{change_id}/. design.md debe declarar exactamente un
+    verification_profile válido (standard, browser, operational o
+    browser_operational) y Browser E2E: required o not_required. Crea el
+    PlanManifest para ese contrato en '{plan_manifest_path}' con
+    ticket_id='{ticket_id}', change_id='{change_id}',
+    ticket_sha256='{ticket_sha256}',
+    ticket_contract_sha256='{ticket_contract_sha256}' y base_gates='{base_gates}'.
+    El manifiesto debe calcular los hashes actuales de los artefactos que creó,
+    usar el perfil de design.md y mapear cada criterio AC-* a tareas.
   expected_output: >
     Un PlanManifest válido.
   agent: arquitect
