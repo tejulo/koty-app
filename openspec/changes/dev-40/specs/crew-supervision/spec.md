@@ -19,6 +19,130 @@ RepairPack, and ReviewPack with hashes before a later phase consumes them.
 - THEN only Programmer is eligible for the next LLM invocation
 - AND Analyst and Architect are not invoked again
 
+### Requirement: Staged Architect artifact generation
+
+After TicketContract validation, the system SHALL invoke Architect once for a
+strict PlanOutline and separately for one strict PlanArtifactUnit for proposal,
+design, tasks, and each required spec. Every Architect invocation SHALL be a
+one-task Crew with no tools, delegation, manager, Flow, or prior invocation
+conversation. The supervisor SHALL assemble validated units into the existing
+PlanDraft shape, SHALL pass it through the existing `write_plan_draft()` path,
+and SHALL preserve the existing PlanManifest and atomic promotion boundary. No
+alternate path SHALL write active OpenSpec artifacts.
+
+#### Scenario: Complete units assemble the existing plan contract
+- GIVEN a validated PlanOutline and one valid unit for every required artifact
+- WHEN the supervisor completes staged planning
+- THEN it assembles the units into the existing PlanDraft shape
+- AND it promotes no active OpenSpec file before all units validate
+- AND it passes the assembled PlanDraft through `write_plan_draft()`
+- AND PlanManifest creation and promotion validation proceed unchanged
+
+### Requirement: Bounded per-unit planning context
+
+The system SHALL build an attempt-scoped project context catalog whose rendered
+index omits section bodies. Each PlanOutline unit SHALL select only known
+context references, limited by default to 12 references and 48,000 rendered
+characters. The outline invocation SHALL receive exactly the serialized
+TicketContract and body-free context index. Each artifact invocation SHALL
+receive exactly the serialized TicketContract, validated PlanOutline, requested
+PlanUnitOutline, and only the selected context bodies for that unit.
+
+#### Scenario: Oversized or unknown context selection is rejected
+- GIVEN an outline unit selects an unknown reference or exceeds a context bound
+- WHEN the supervisor validates the PlanOutline
+- THEN planning fails before an artifact-unit LLM invocation
+- AND the active OpenSpec artifacts remain unchanged
+
+#### Scenario: Artifact unit receives selected context only
+- GIVEN a valid outline unit selects a bounded subset of catalog references
+- WHEN the supervisor invokes Architect for that unit
+- THEN the prompt includes the serialized TicketContract, validated PlanOutline, requested PlanUnitOutline, and selected section bodies
+- AND it does not include unselected project-context section bodies
+
+#### Scenario: Outline receives the body-free index only
+- GIVEN a TicketContract and an attempt-scoped context catalog
+- WHEN the supervisor invokes Architect for the outline
+- THEN the prompt includes exactly the serialized TicketContract and rendered context index
+- AND the rendered index contains no project-context section body
+
+### Requirement: Durable staged-planning checkpoints
+
+The system SHALL atomically persist an attempt-scoped context catalog and
+planning checkpoint after outline completion, every artifact-unit success, and
+every handled failure. The checkpoint SHALL bind TicketContract, catalog,
+outline, units, and invocation status by hash. ExecutionState SHALL atomically
+reference both its exact expected attempt path and its persisted file SHA-256.
+Resume SHALL require both reference fields, compare the file bytes before model
+loading, validate and reuse completed units, and invoke only missing units. A
+checkpoint without a state reference, an incomplete reference, an unexpected
+attempt path, or a digest mismatch SHALL block rather than be adopted. Ticket
+change and replan SHALL clear both active checkpoint reference fields while
+retaining prior evidence.
+
+#### Scenario: Resume reuses validated units
+- GIVEN planning stopped after one or more units were checkpointed
+- WHEN the supervisor resumes with matching ticket, catalog, and checkpoint hashes
+- THEN it does not regenerate the outline or completed units
+- AND it continues with the first missing unit in the same planning attempt
+- AND active OpenSpec artifacts remain unchanged until final assembly validates
+
+#### Scenario: Stale or orphan checkpoint blocks
+- GIVEN a planning checkpoint file is not referenced by ExecutionState or its bytes do not match the referenced SHA-256
+- WHEN the supervisor resumes planning
+- THEN it blocks before loading the checkpoint or invoking Architect
+- AND it does not adopt the checkpoint as current control state
+
+### Requirement: Supervisor-owned Architect length retries
+
+Architect SHALL use `max_retry_limit=0`. The supervisor SHALL recognize a
+`LengthFinishReasonError` raised directly or present in the exception cause or
+context chain, persist failed-call usage, and retry only the failed artifact unit
+once with the configured 16,000-token retry budget. Normal outline and artifact
+budgets SHALL default to 4,000 and 8,000 tokens. A unit retry SHALL not increment
+`ExecutionState.last_attempt`, and retry exhaustion SHALL block planning while
+preserving the checkpoint and invocation evidence.
+
+The supervisor SHALL apply at-most-once dispatch semantics to the operation-wide
+empty-response retry for both outline and artifact calls and to each per-unit
+length retry. It SHALL atomically persist `pending` and SHALL move it to
+`consumed` before external dispatch. If a restart observes `consumed` without a
+persisted result, planning SHALL block as uncertain or exhausted and SHALL NOT
+dispatch that retry again. A crash before or during dispatch MAY forfeit the
+retry so configured retry counts are never exceeded without provider
+idempotency.
+
+#### Scenario: Wrapped length failure retries only its unit
+- GIVEN proposal and design units are already checkpointed
+- AND the tasks unit fails with a wrapped `LengthFinishReasonError`
+- WHEN the supervisor handles the failure
+- THEN it records distinct failed-invocation usage for the tasks unit
+- AND it retries only the tasks unit once with the retry token budget
+- AND it does not regenerate the outline, proposal, or design units
+- AND `ExecutionState.last_attempt` remains unchanged
+
+#### Scenario: Direct length failure uses the same retry path
+- GIVEN an artifact unit's first call raises `LengthFinishReasonError` directly
+- WHEN the supervisor handles the failure
+- THEN it records distinct failed-invocation usage for that unit
+- AND it retries only that unit once with the same retry budget used for a wrapped error
+- AND `ExecutionState.last_attempt` remains unchanged
+
+#### Scenario: Length retry exhaustion preserves progress
+- GIVEN an artifact unit has already consumed its one length retry
+- WHEN that retry raises a direct or wrapped `LengthFinishReasonError`
+- THEN planning enters `blocked`
+- AND the latest checkpoint and usage evidence retain all completed and failed invocations
+- AND no active OpenSpec artifact is replaced
+
+#### Scenario: Crash after retry consumption does not redispatch
+- GIVEN an empty-response or per-unit length retry is durably `consumed`
+- AND no result for that retry was persisted before the process stopped
+- WHEN planning restarts
+- THEN planning enters `blocked`
+- AND the retry is not dispatched again
+- AND the checkpoint, ExecutionState, and `last_attempt` remain preserved
+
 ### Requirement: Immutable base verification
 
 The system SHALL execute `python`, `lint`, `test`, `build`, `integration`, and
@@ -108,16 +232,19 @@ and browser result.
 
 The system SHALL invoke Analyst, Architect, Programmer, Tester, and Reviewer
 as separate one-task CrewAI executions with dynamic delegation disabled. Roles
-SHALL receive only paths to their phase-specific contracts, except Architect,
-which receives the serialized TicketContract and project context because it has
-no filesystem tools. No role SHALL receive another role's conversation output.
-The system SHALL not introduce a CrewAI manager or Flow.
+SHALL receive only paths to their phase-specific contracts, except the Architect
+outline invocation, which receives exactly the serialized TicketContract and
+body-free context index, and each Architect artifact invocation, which receives
+exactly the serialized TicketContract, validated PlanOutline, requested
+PlanUnitOutline, and selected context bodies. No role SHALL receive another
+role's conversation output. The system SHALL not introduce a CrewAI manager or
+Flow.
 
 #### Scenario: Each role receives only its phase inputs
 - GIVEN a role invocation prepared by the supervisor
 - WHEN the CrewAI task is created
 - THEN the Crew contains exactly one task for that role
-- AND Architect receives only the serialized TicketContract and project context
+- AND the Architect outline and artifact invocations receive only their exact staged inputs
 - AND every other role receives only the required contract, pack, evidence, or scenario paths
 - AND no prior role conversation output is supplied
 
@@ -157,11 +284,22 @@ let `--replan` atomically invalidate planning references while retaining prior
 attempt evidence. Ralph SHALL remain responsible for local queue, branch,
 worker, and finalization supervision.
 
+Before any planning contract, catalog, or checkpoint validation and before any
+staged Architect invocation, the system SHALL recover a pending plan-promotion
+marker by restoring its attempt-scoped previous-plan snapshot.
+
 #### Scenario: Explicit replan retains evidence
 - GIVEN a ticket with persisted execution state and attempt evidence
 - WHEN the ticket is invoked with `--replan`
 - THEN the supervisor clears plan-contract references and transitions to `planning`
 - AND prior attempt evidence remains under the active OpenSpec change
+
+#### Scenario: Pending promotion is recovered before early planning failure
+- GIVEN a prior process stopped after partially replacing active OpenSpec files
+- AND its durable promotion marker and previous-plan snapshot remain
+- WHEN resumed staged planning later fails before `write_plan_draft()`
+- THEN the previous active OpenSpec plan is restored before that failure
+- AND no staged Architect invocation precedes restoration
 
 #### Scenario: Ralph remains the local supervisor
 - GIVEN `ralph.sh --until-finalized` processes a ticket

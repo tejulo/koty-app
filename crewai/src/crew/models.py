@@ -1,6 +1,8 @@
+import hashlib
+import json
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 Check = Literal["passed", "failed", "skipped"]
@@ -57,6 +59,185 @@ class PlanDraft(BaseModel):
         capabilities = [spec.capability for spec in self.specs]
         if len(capabilities) != len(set(capabilities)):
             raise ValueError("PlanDraft has duplicate spec capabilities")
+        return self
+
+
+ArtifactKind = Literal["proposal", "design", "tasks", "spec"]
+
+
+class StrictPlanningModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+def canonical_model_sha256(model: BaseModel) -> str:
+    content = json.dumps(
+        model.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+class ProjectContextSection(StrictPlanningModel):
+    ref: str = Field(pattern=r"^context-[0-9]{3}$")
+    heading: str = Field(pattern=r"^#{2,3} .+$")
+    body: str
+    size: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def require_exact_size(self):
+        if self.size != len(self.body):
+            raise ValueError("ProjectContextSection size does not match its body")
+        return self
+
+
+class ProjectContextCatalog(StrictPlanningModel):
+    schema_version: Literal[1] = 1
+    source_path: str = Field(min_length=1)
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sections: list[ProjectContextSection] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def require_unique_refs(self):
+        refs = [section.ref for section in self.sections]
+        if len(refs) != len(set(refs)):
+            raise ValueError("ProjectContextCatalog has duplicate refs")
+        return self
+
+
+class PlanUnitOutline(StrictPlanningModel):
+    artifact: ArtifactKind
+    capability: str | None = Field(
+        default=None,
+        pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+    )
+    objective: str = Field(min_length=1, pattern=r"\S")
+    context_refs: list[str]
+
+    @model_validator(mode="after")
+    def require_artifact_capability(self):
+        if self.artifact == "spec" and self.capability is None:
+            raise ValueError("spec units require a capability")
+        if self.artifact != "spec" and self.capability is not None:
+            raise ValueError("core units cannot declare a capability")
+        return self
+
+    @property
+    def unit_key(self) -> str:
+        return f"spec:{self.capability}" if self.artifact == "spec" else self.artifact
+
+
+class PlanOutline(StrictPlanningModel):
+    schema_version: Literal[1] = 1
+    profile: VerificationProfile
+    units: list[PlanUnitOutline]
+    acceptance_map: dict[str, list[str]]
+
+    @model_validator(mode="after")
+    def require_complete_unique_units(self):
+        keys = [unit.unit_key for unit in self.units]
+        if len(keys) != len(set(keys)):
+            raise ValueError("PlanOutline has duplicate units")
+        core = {unit.artifact for unit in self.units if unit.artifact != "spec"}
+        missing = {"proposal", "design", "tasks"} - core
+        if missing:
+            raise ValueError(
+                "PlanOutline is missing core units: " + ", ".join(sorted(missing))
+            )
+        if not any(unit.artifact == "spec" for unit in self.units):
+            raise ValueError("PlanOutline requires at least one spec unit")
+        return self
+
+
+class PlanArtifactUnit(StrictPlanningModel):
+    schema_version: Literal[1] = 1
+    artifact: ArtifactKind
+    capability: str | None = Field(
+        default=None,
+        pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+    )
+    content: str = Field(min_length=1, pattern=r"\S")
+
+    @model_validator(mode="after")
+    def require_artifact_capability(self):
+        if self.artifact == "spec" and self.capability is None:
+            raise ValueError("spec units require a capability")
+        if self.artifact != "spec" and self.capability is not None:
+            raise ValueError("core units cannot declare a capability")
+        return self
+
+    @property
+    def unit_key(self) -> str:
+        return f"spec:{self.capability}" if self.artifact == "spec" else self.artifact
+
+
+class PlanningCheckpoint(StrictPlanningModel):
+    schema_version: Literal[1] = 1
+    ticket_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    context_catalog_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    outline_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    outline: PlanOutline
+    units: list[PlanArtifactUnit] = Field(default_factory=list)
+    unit_sha256: dict[str, str] = Field(default_factory=dict)
+    invocation_status: dict[str, Literal["pending", "completed", "failed"]] = Field(
+        default_factory=dict
+    )
+    length_retry_status: dict[str, Literal["pending", "consumed"]] = Field(
+        default_factory=dict
+    )
+
+    @model_validator(mode="after")
+    def require_hash_bound_units(self):
+        if self.outline_sha256 != canonical_model_sha256(self.outline):
+            raise ValueError("PlanningCheckpoint outline hash does not match outline")
+        unit_keys = [unit.unit_key for unit in self.units]
+        if len(unit_keys) != len(set(unit_keys)):
+            raise ValueError("PlanningCheckpoint has duplicate units")
+        if set(unit_keys) != set(self.unit_sha256):
+            raise ValueError("PlanningCheckpoint unit hashes do not match units")
+        if any(
+            len(value) != 64 or set(value) - set("0123456789abcdef")
+            for value in self.unit_sha256.values()
+        ):
+            raise ValueError("PlanningCheckpoint has an invalid unit hash")
+        if any(
+            self.unit_sha256[unit.unit_key] != canonical_model_sha256(unit)
+            for unit in self.units
+        ):
+            raise ValueError("PlanningCheckpoint unit hash does not match stored unit")
+        outline_keys = {unit.unit_key for unit in self.outline.units}
+        if not set(unit_keys) <= outline_keys:
+            raise ValueError("PlanningCheckpoint contains units outside its outline")
+        if not set(self.invocation_status) <= outline_keys:
+            raise ValueError("PlanningCheckpoint has status for an unknown unit")
+        if not set(self.length_retry_status) <= outline_keys:
+            raise ValueError("PlanningCheckpoint has length retry for an unknown unit")
+        completed = {
+            key for key, status in self.invocation_status.items() if status == "completed"
+        }
+        if completed != set(unit_keys):
+            raise ValueError(
+                "PlanningCheckpoint completed statuses must match stored units"
+            )
+        stored = set(unit_keys)
+        for key, retry_status in self.length_retry_status.items():
+            invocation_status = self.invocation_status.get(key)
+            if retry_status == "pending" and (
+                invocation_status != "failed" or key in stored
+            ):
+                raise ValueError(
+                    "PlanningCheckpoint pending length retry requires failed "
+                    "invocation status and no stored unit"
+                )
+            if retry_status == "consumed" and invocation_status not in {
+                "failed",
+                "completed",
+            }:
+                raise ValueError(
+                    "PlanningCheckpoint consumed length retry requires failed or "
+                    "completed invocation status"
+                )
         return self
 
 
@@ -165,12 +346,41 @@ class ExecutionState(BaseModel):
     last_attempt: int = Field(default=0, ge=0)
     phase_attempts: dict[Phase, int] = Field(default_factory=dict)
     ticket_contract_path: str | None = None
+    planning_checkpoint_path: str | None = None
+    planning_checkpoint_sha256: str | None = Field(
+        default=None, pattern=r"[0-9a-f]{64}"
+    )
+    planning_empty_response_retry_state: Literal[
+        "available", "pending", "consumed"
+    ] = "available"
+    planning_empty_response_retry_target: str | None = Field(
+        default=None, min_length=1
+    )
     plan_manifest_path: str | None = None
     task_completion_path: str | None = None
     repair_pack_path: str | None = None
     review_pack_path: str | None = None
     browser_result_path: str | None = None
     phase_usage: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def require_bound_planning_control_state(self):
+        if (self.planning_checkpoint_path is None) != (
+            self.planning_checkpoint_sha256 is None
+        ):
+            raise ValueError(
+                "ExecutionState planning checkpoint path and hash must be set together"
+            )
+        if self.planning_empty_response_retry_state == "available":
+            if self.planning_empty_response_retry_target is not None:
+                raise ValueError(
+                    "Available planning empty-response retry cannot have a target"
+                )
+        elif self.planning_empty_response_retry_target is None:
+            raise ValueError(
+                "Pending or consumed planning empty-response retry requires a target"
+            )
+        return self
 
 
 class TesterResult(BaseModel):

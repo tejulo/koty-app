@@ -45,6 +45,14 @@ def ticket_contract_path(change_id: str, attempt: int) -> Path:
     return _attempt_directory(change_id, attempt) / "ticket-contract.json"
 
 
+def context_catalog_path(change_id: str, attempt: int) -> Path:
+    return _attempt_directory(change_id, attempt) / "context-catalog.json"
+
+
+def planning_checkpoint_path(change_id: str, attempt: int) -> Path:
+    return _attempt_directory(change_id, attempt) / "planning-checkpoint.json"
+
+
 def plan_manifest_path(change_id: str, attempt: int) -> Path:
     return _attempt_directory(change_id, attempt) / "plan-manifest.json"
 
@@ -96,7 +104,7 @@ def write_plan_draft(change_id: str, attempt: int, draft: PlanDraft) -> dict[str
     change = PROJECT_ROOT / "openspec" / "changes" / change_id
     previous = _attempt_directory(change_id, attempt) / "previous-plan"
     stage = _attempt_directory(change_id, attempt) / "plan-draft"
-    _recover_plan_promotion(change)
+    recover_plan_promotion(change_id)
     _snapshot_plan(change, previous)
     artifacts = {
         "proposal.md": draft.proposal,
@@ -145,6 +153,11 @@ def restore_plan_draft(change_id: str, attempt: int) -> None:
 def complete_plan_promotion(change_id: str) -> None:
     _validate_change_id(change_id)
     _promotion_marker(PROJECT_ROOT / "openspec" / "changes" / change_id).unlink(missing_ok=True)
+
+
+def recover_plan_promotion(change_id: str) -> None:
+    _validate_change_id(change_id)
+    _recover_plan_promotion(PROJECT_ROOT / "openspec" / "changes" / change_id)
 
 
 def _snapshot_plan(change: Path, previous: Path) -> None:

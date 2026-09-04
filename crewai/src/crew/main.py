@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import TypeVar
 
 from dotenv import load_dotenv
+from openai import LengthFinishReasonError
 from pydantic import BaseModel
-from crewai.utilities.converter import ConverterError
 
 from .crew import KotyAppCrew
 from .evidence import diagnose_integration_failure
@@ -18,8 +18,11 @@ from .linear_api import get_issue
 from .models import (
     ExecutionState,
     CrewResult,
-    PlanDraft,
+    PlanArtifactUnit,
     PlanManifest,
+    PlanOutline,
+    PlanningCheckpoint,
+    ProjectContextCatalog,
     RepairPack,
     ReviewPack,
     ReviewVerdict,
@@ -27,6 +30,14 @@ from .models import (
     TesterResult,
     TicketContract,
     VerificationResult,
+    canonical_model_sha256,
+)
+from .planning import (
+    assemble_plan_draft,
+    build_context_catalog,
+    render_context_bundle,
+    render_context_index,
+    validate_plan_outline,
 )
 from .tools.custom_tool import close_local_environment, close_playwright_session
 from . import workflow
@@ -40,14 +51,12 @@ os.environ["OTEL_SDK_DISABLED"] = "true"
 
 ROLE_LIMITS = {
     "analyst": ("ZEN_ANALYST_MODEL", "ZEN_ANALYST_MAX_TOKENS", 4, 2000),
-    "architect": ("ZEN_ARCHITECT_MODEL", "ZEN_ARCHITECT_MAX_TOKENS", 1, 4000),
     "programmer": ("ZEN_CODER_MODEL", "ZEN_CODER_MAX_TOKENS", 20, 2500),
     "tester": ("ZEN_TESTER_MODEL", "ZEN_TESTER_MAX_TOKENS", 8, 600),
     "reviewer": ("ZEN_REVIEWER_MODEL", "ZEN_REVIEWER_MAX_TOKENS", 8, 800),
 }
 ROLE_CREWS = {
     "analyst": "analyst_crew",
-    "architect": "architect_crew",
     "programmer": "programmer_crew",
     "tester": "tester_crew",
     "reviewer": "reviewer_crew",
@@ -91,6 +100,16 @@ def kickoff_role(role: str, *, inputs: dict[str, str]) -> object:
     return crew_factory().kickoff(inputs=inputs)
 
 
+def kickoff_architect_outline(*, inputs: dict[str, str]) -> object:
+    return KotyAppCrew().architect_outline_crew().kickoff(inputs=inputs)
+
+
+def kickoff_architect_artifact(
+    *, inputs: dict[str, str], retry: bool = False
+) -> object:
+    return KotyAppCrew().architect_artifact_crew(retry=retry).kickoff(inputs=inputs)
+
+
 def _run_gate(name: str, change_id: str) -> GateRun:
     return run_gate(name, change_id)
 
@@ -123,22 +142,6 @@ def _selected_profile(change_id: str) -> str:
     return workflow.selected_profile(change_id)
 
 
-def _project_context() -> str:
-    context = workflow.PROJECT_ROOT / "CONTEXT.md"
-    return context.read_text(encoding="utf-8") if context.is_file() else ""
-
-
-def _kickoff_architect(state: ExecutionState, inputs: dict[str, str]) -> object:
-    for retry in range(2):
-        try:
-            return kickoff_role("architect", inputs=inputs)
-        except ValueError as error:
-            if str(error) != EMPTY_ARCHITECT_RESPONSE or retry == 1:
-                raise
-            state.phase_usage["planning:architect_empty_response_retries"] = retry + 1
-    raise RuntimeError("Architect retry loop exited unexpectedly")
-
-
 def _as_model(output: object, model_type: type[ModelT]) -> ModelT:
     value = getattr(output, "pydantic", None)
     if isinstance(value, model_type):
@@ -154,28 +157,91 @@ def _serializable(value: object) -> object:
     return json.loads(json.dumps(value, default=str))
 
 
-def _record_usage(state: ExecutionState, role: str, output: object) -> None:
+def _exception_chain(error: BaseException):
+    pending = [error]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+
+
+def _is_length_finish_reason(error: BaseException) -> bool:
+    return any(isinstance(item, LengthFinishReasonError) for item in _exception_chain(error))
+
+
+def _usage_from(value: object) -> object | None:
+    values = _exception_chain(value) if isinstance(value, BaseException) else (value,)
+    for item in values:
+        usage = getattr(item, "token_usage", None)
+        if usage is None:
+            usage = getattr(item, "usage_metrics", None)
+        if usage is None:
+            usage = getattr(getattr(item, "completion", None), "usage", None)
+        if usage is not None:
+            return usage
+    return None
+
+
+def _record_usage(
+    state: ExecutionState,
+    role: str,
+    output: object,
+    *,
+    stage: str | None = None,
+    unit: str | None = None,
+    invocation: int | None = None,
+    status: str = "completed",
+    effective_limit: int | None = None,
+    error: BaseException | None = None,
+    retry: bool = False,
+) -> None:
     phase = state.phase
     attempt = _attempt(state)
-    model_env, max_tokens_env, max_iter, default_max_tokens = ROLE_LIMITS[role]
-    max_tokens = int(os.environ.get(max_tokens_env, default_max_tokens))
-    usage = getattr(output, "token_usage", None)
-    if usage is None:
-        usage = getattr(output, "usage_metrics", None)
+    if role == "architect":
+        model_env = "ZEN_ARCHITECT_MODEL"
+        max_iter = 1
+        max_tokens = effective_limit or 4000
+    else:
+        model_env, max_tokens_env, max_iter, default_max_tokens = ROLE_LIMITS[role]
+        max_tokens = int(os.environ.get(max_tokens_env, default_max_tokens))
+    invocation = invocation or state.phase_attempts.get(phase, 0) + 1
+    usage = _usage_from(output)
     payload = {
         "phase": phase,
         "role": role,
+        "stage": stage or phase,
+        "unit": unit,
+        "invocation": invocation,
+        "status": status,
+        "effective_limit": max_tokens,
+        "error_type": type(error).__name__ if error is not None else None,
+        "length_failure": _is_length_finish_reason(error) if error is not None else False,
+        "retry": retry,
         "model": os.environ.get(model_env),
         "limits": {"max_iter": max_iter, "max_tokens": max_tokens},
         "attempt": attempt,
         "usage": _serializable(usage) if usage is not None else None,
     }
-    path = workflow.ticket_contract_path(state.change_id or "invalid", attempt).parent / f"phase-usage-{phase}-{role}.json"
+    filename = f"phase-usage-{phase}-{role}"
+    if role == "architect":
+        safe_unit = re.sub(r"[^a-zA-Z0-9-]+", "-", unit or "none").strip("-")
+        filename += f"-{stage}-{safe_unit}-{invocation}"
+    path = workflow.ticket_contract_path(state.change_id or "invalid", attempt).parent / f"{filename}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(temporary, path)
     reference = _relative(path)
+    if role == "architect":
+        state.phase_usage[f"{phase}:{role}:{stage}:{unit}:{invocation}"] = reference
+        state.phase_usage[f"{phase}:{role}:{stage}:{unit}"] = reference
     state.phase_usage[f"{phase}:{role}"] = reference
     state.phase_usage[phase] = reference
     state.phase_attempts[phase] = state.phase_attempts.get(phase, 0) + 1
@@ -188,6 +254,10 @@ def _reset_for_planning(state: ExecutionState, ticket_sha256: str) -> ExecutionS
     state.plan_sha256 = None
     state.profile = None
     state.ticket_contract_path = None
+    state.planning_checkpoint_path = None
+    state.planning_checkpoint_sha256 = None
+    state.planning_empty_response_retry_state = "available"
+    state.planning_empty_response_retry_target = None
     state.plan_manifest_path = None
     state.task_completion_path = None
     state.repair_pack_path = None
@@ -313,41 +383,337 @@ def _save_repair_pack(
     return state
 
 
+def _architect_limit(stage: str, *, retry: bool = False) -> int:
+    if stage == "outline":
+        return int(os.environ.get("ZEN_ARCHITECT_OUTLINE_MAX_TOKENS", "4000"))
+    name = "ZEN_ARCHITECT_RETRY_MAX_TOKENS" if retry else "ZEN_ARCHITECT_ARTIFACT_MAX_TOKENS"
+    return int(os.environ.get(name, "16000" if retry else "8000"))
+
+
+def _save_planning_checkpoint(
+    ticket_id: str,
+    state: ExecutionState,
+    path: Path,
+    checkpoint: PlanningCheckpoint,
+) -> None:
+    workflow.save_model(path, checkpoint)
+    digest = workflow.file_sha256(path)
+    state.planning_checkpoint_path = _relative(path)
+    state.planning_checkpoint_sha256 = digest
+    workflow.save_execution(ticket_id, state)
+
+
+def _validate_empty_retry_resume(
+    state: ExecutionState, checkpoint: PlanningCheckpoint | None
+) -> None:
+    retry_state = state.planning_empty_response_retry_state
+    target = state.planning_empty_response_retry_target
+    if retry_state == "available":
+        return
+    if target is None:
+        raise ValueError("Architect empty-response retry has no persisted target")
+    if retry_state == "pending":
+        if checkpoint is None and target != "outline":
+            raise ValueError("Architect empty-response retry target is stale")
+        if checkpoint is not None:
+            outline_keys = {unit.unit_key for unit in checkpoint.outline.units}
+            completed = {unit.unit_key for unit in checkpoint.units}
+            if target not in outline_keys or target in completed:
+                raise ValueError("Architect empty-response retry target is stale")
+        return
+    result_persisted = checkpoint is not None and (
+        target == "outline" or target in {unit.unit_key for unit in checkpoint.units}
+    )
+    if not result_persisted:
+        raise ValueError(
+            f"Architect empty-response retry outcome is uncertain or exhausted for {target}"
+        )
+
+
+def _next_architect_invocation(
+    change_id: str, attempt: int, stage: str, unit: str
+) -> int:
+    safe_unit = re.sub(r"[^a-zA-Z0-9-]+", "-", unit).strip("-")
+    directory = workflow.ticket_contract_path(change_id, attempt).parent
+    return len(list(directory.glob(f"phase-usage-planning-architect-{stage}-{safe_unit}-*.json"))) + 1
+
+
 def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
     plan_written = False
     try:
+        workflow.recover_plan_promotion(change_id)
         attempt = _attempt(state)
         ticket_sha256 = state.ticket_sha256 or current_ticket_sha256(ticket_id)
-        analyst = kickoff_role(
-            "analyst",
-            inputs={
-                "ticket_id": ticket_id,
-                "change_id": change_id,
-                "ticket_sha256": ticket_sha256,
-            },
-        )
-        _record_usage(state, "analyst", analyst)
-        contract = _as_model(analyst, TicketContract)
-        if (contract.ticket_id, contract.change_id, contract.ticket_sha256) != (ticket_id, change_id, ticket_sha256):
-            raise ValueError("TicketContract does not match the current ticket")
+        state.ticket_sha256 = ticket_sha256
         contract_path = workflow.ticket_contract_path(change_id, attempt)
-        workflow.save_model(contract_path, contract)
+        if state.ticket_contract_path:
+            if state.ticket_contract_path != _relative(contract_path):
+                raise ValueError("Execution state TicketContract path is stale")
+            contract = workflow.load_model(contract_path, TicketContract)
+        else:
+            analyst = kickoff_role(
+                "analyst",
+                inputs={
+                    "ticket_id": ticket_id,
+                    "change_id": change_id,
+                    "ticket_sha256": ticket_sha256,
+                },
+            )
+            contract = _as_model(analyst, TicketContract)
+            _record_usage(state, "analyst", analyst)
+            workflow.save_model(contract_path, contract)
+            state.ticket_contract_path = _relative(contract_path)
+            workflow.save_execution(ticket_id, state)
+        if (contract.ticket_id, contract.change_id, contract.ticket_sha256) != (
+            ticket_id,
+            change_id,
+            ticket_sha256,
+        ):
+            raise ValueError("TicketContract does not match the current ticket")
 
-        plan_path = workflow.plan_manifest_path(change_id, attempt)
-        architect = _kickoff_architect(
-            state,
-            {
+        catalog_path = workflow.context_catalog_path(change_id, attempt)
+        fresh_catalog = build_context_catalog(workflow.PROJECT_ROOT / "CONTEXT.md")
+        if catalog_path.is_file():
+            catalog = workflow.load_model(catalog_path, ProjectContextCatalog)
+            if catalog != fresh_catalog:
+                raise ValueError("Persisted context catalog is stale")
+        else:
+            catalog = fresh_catalog
+            workflow.save_model(catalog_path, catalog)
+            workflow.save_execution(ticket_id, state)
+
+        checkpoint_path = workflow.planning_checkpoint_path(change_id, attempt)
+        checkpoint = None
+        checkpoint_reference = _relative(checkpoint_path)
+        has_checkpoint_path = state.planning_checkpoint_path is not None
+        has_checkpoint_digest = state.planning_checkpoint_sha256 is not None
+        if has_checkpoint_path != has_checkpoint_digest:
+            raise ValueError("Execution state planning checkpoint reference is incomplete")
+        if has_checkpoint_path:
+            if state.planning_checkpoint_path != checkpoint_reference:
+                raise ValueError("Execution state planning checkpoint path is stale")
+            if not checkpoint_path.is_file():
+                raise ValueError("Execution state planning checkpoint file is missing")
+            if workflow.file_sha256(checkpoint_path) != state.planning_checkpoint_sha256:
+                raise ValueError("Execution state planning checkpoint hash is stale")
+            checkpoint = workflow.load_model(checkpoint_path, PlanningCheckpoint)
+            if checkpoint.ticket_contract_sha256 != canonical_model_sha256(contract):
+                raise ValueError("PlanningCheckpoint TicketContract hash is stale")
+            if checkpoint.context_catalog_sha256 != canonical_model_sha256(catalog):
+                raise ValueError("PlanningCheckpoint context catalog hash is stale")
+            validate_plan_outline(
+                checkpoint.outline,
+                contract,
+                catalog,
+                int(os.environ.get("ZEN_ARCHITECT_MAX_CONTEXT_REFS", "12")),
+                int(os.environ.get("ZEN_ARCHITECT_MAX_CONTEXT_CHARS", "48000")),
+            )
+        elif checkpoint_path.exists():
+            raise ValueError("Planning checkpoint file has no execution state reference")
+
+        _validate_empty_retry_resume(state, checkpoint)
+
+        if checkpoint is None:
+            outline_inputs = {
                 "ticket_contract_json": contract.model_dump_json(),
-                "project_context": _project_context(),
-            },
-        )
-        _record_usage(state, "architect", architect)
-        draft = _as_model(architect, PlanDraft)
+                "context_index": render_context_index(catalog),
+            }
+            while True:
+                invocation = _next_architect_invocation(
+                    change_id, attempt, "outline", "outline"
+                )
+                if state.planning_empty_response_retry_state == "pending":
+                    if state.planning_empty_response_retry_target != "outline":
+                        raise ValueError("Architect empty-response retry target is stale")
+                    state.planning_empty_response_retry_state = "consumed"
+                    workflow.save_execution(ticket_id, state)
+                output = None
+                try:
+                    output = kickoff_architect_outline(inputs=outline_inputs)
+                    plan_outline = _as_model(output, PlanOutline)
+                    validate_plan_outline(
+                        plan_outline,
+                        contract,
+                        catalog,
+                        int(os.environ.get("ZEN_ARCHITECT_MAX_CONTEXT_REFS", "12")),
+                        int(os.environ.get("ZEN_ARCHITECT_MAX_CONTEXT_CHARS", "48000")),
+                    )
+                except Exception as error:
+                    empty_retry_scheduled = (
+                        isinstance(error, ValueError)
+                        and str(error) == EMPTY_ARCHITECT_RESPONSE
+                        and state.planning_empty_response_retry_state == "available"
+                    )
+                    if empty_retry_scheduled:
+                        state.planning_empty_response_retry_state = "pending"
+                        state.planning_empty_response_retry_target = "outline"
+                        state.phase_usage[
+                            "planning:architect_empty_response_retries"
+                        ] = 1
+                        workflow.save_execution(ticket_id, state)
+                    _record_usage(
+                        state,
+                        "architect",
+                        output if output is not None else error,
+                        stage="outline",
+                        unit="outline",
+                        invocation=invocation,
+                        status="failed",
+                        effective_limit=_architect_limit("outline"),
+                        error=error,
+                    )
+                    workflow.save_execution(ticket_id, state)
+                    if empty_retry_scheduled:
+                        continue
+                    raise
+                _record_usage(
+                    state,
+                    "architect",
+                    output,
+                    stage="outline",
+                    unit="outline",
+                    invocation=invocation,
+                    effective_limit=_architect_limit("outline"),
+                )
+                workflow.save_execution(ticket_id, state)
+                break
+            checkpoint = PlanningCheckpoint(
+                ticket_contract_sha256=canonical_model_sha256(contract),
+                context_catalog_sha256=canonical_model_sha256(catalog),
+                outline_sha256=canonical_model_sha256(plan_outline),
+                outline=plan_outline,
+                invocation_status={unit.unit_key: "pending" for unit in plan_outline.units},
+            )
+            _save_planning_checkpoint(ticket_id, state, checkpoint_path, checkpoint)
+
+        completed = {unit.unit_key for unit in checkpoint.units}
+        length_retry_enabled = int(
+            os.environ.get("ZEN_ARCHITECT_LENGTH_RETRIES", "1")
+        ) > 0
+        for requested in checkpoint.outline.units:
+            if requested.unit_key in completed:
+                continue
+            artifact_inputs = {
+                "ticket_contract_json": contract.model_dump_json(),
+                "plan_outline_json": checkpoint.outline.model_dump_json(),
+                "plan_unit_outline_json": requested.model_dump_json(),
+                "project_context": render_context_bundle(
+                    catalog,
+                    requested.context_refs,
+                    int(os.environ.get("ZEN_ARCHITECT_MAX_CONTEXT_REFS", "12")),
+                    int(os.environ.get("ZEN_ARCHITECT_MAX_CONTEXT_CHARS", "48000")),
+                ),
+            }
+            invocation = _next_architect_invocation(
+                change_id, attempt, "artifact", requested.unit_key
+            )
+            while True:
+                empty_retry = state.planning_empty_response_retry_state == "pending"
+                if empty_retry:
+                    if (
+                        state.planning_empty_response_retry_target
+                        != requested.unit_key
+                    ):
+                        raise ValueError("Architect empty-response retry target is stale")
+                    state.planning_empty_response_retry_state = "consumed"
+                    workflow.save_execution(ticket_id, state)
+                retry_status = checkpoint.length_retry_status.get(requested.unit_key)
+                if retry_status == "pending":
+                    checkpoint.length_retry_status[requested.unit_key] = "consumed"
+                    _save_planning_checkpoint(
+                        ticket_id, state, checkpoint_path, checkpoint
+                    )
+                    retry = True
+                elif (
+                    retry_status == "consumed"
+                    and checkpoint.invocation_status.get(requested.unit_key) == "failed"
+                ):
+                    if empty_retry:
+                        retry = True
+                    else:
+                        raise ValueError(
+                            f"Architect length retry exhausted for {requested.unit_key}"
+                        )
+                else:
+                    retry = False
+                output = None
+                try:
+                    output = kickoff_architect_artifact(inputs=artifact_inputs, retry=retry)
+                    unit = _as_model(output, PlanArtifactUnit)
+                    if unit.unit_key != requested.unit_key:
+                        raise ValueError(
+                            f"Architect returned {unit.unit_key} for requested unit {requested.unit_key}"
+                    )
+                except Exception as error:
+                    checkpoint.invocation_status[requested.unit_key] = "failed"
+                    length_retry_scheduled = (
+                        _is_length_finish_reason(error)
+                        and not retry
+                        and length_retry_enabled
+                        and requested.unit_key not in checkpoint.length_retry_status
+                    )
+                    if length_retry_scheduled:
+                        checkpoint.length_retry_status[requested.unit_key] = "pending"
+                    empty_retry_scheduled = (
+                        isinstance(error, ValueError)
+                        and str(error) == EMPTY_ARCHITECT_RESPONSE
+                        and state.planning_empty_response_retry_state == "available"
+                    )
+                    if empty_retry_scheduled:
+                        state.planning_empty_response_retry_state = "pending"
+                        state.planning_empty_response_retry_target = requested.unit_key
+                        state.phase_usage[
+                            "planning:architect_empty_response_retries"
+                        ] = 1
+                        workflow.save_execution(ticket_id, state)
+                    _record_usage(
+                        state,
+                        "architect",
+                        output if output is not None else error,
+                        stage="artifact",
+                        unit=requested.unit_key,
+                        invocation=invocation,
+                        status="failed",
+                        effective_limit=_architect_limit("artifact", retry=retry),
+                        error=error,
+                        retry=retry,
+                    )
+                    _save_planning_checkpoint(ticket_id, state, checkpoint_path, checkpoint)
+                    if empty_retry_scheduled:
+                        invocation = _next_architect_invocation(
+                            change_id, attempt, "artifact", requested.unit_key
+                        )
+                        continue
+                    if length_retry_scheduled:
+                        invocation = _next_architect_invocation(
+                            change_id, attempt, "artifact", requested.unit_key
+                        )
+                        continue
+                    raise
+                _record_usage(
+                    state,
+                    "architect",
+                    output,
+                    stage="artifact",
+                    unit=requested.unit_key,
+                    invocation=invocation,
+                    effective_limit=_architect_limit("artifact", retry=retry),
+                    retry=retry,
+                )
+                checkpoint.units.append(unit)
+                checkpoint.unit_sha256[unit.unit_key] = canonical_model_sha256(unit)
+                checkpoint.invocation_status[unit.unit_key] = "completed"
+                _save_planning_checkpoint(ticket_id, state, checkpoint_path, checkpoint)
+                completed.add(unit.unit_key)
+                break
+
+        draft = assemble_plan_draft(checkpoint.outline, checkpoint.units)
         profile = workflow.profile_from_design(draft.design)
         if draft.profile != profile:
             raise ValueError("PlanDraft profile does not match design")
         artifact_paths = workflow.write_plan_draft(change_id, attempt, draft)
         plan_written = True
+        plan_path = workflow.plan_manifest_path(change_id, attempt)
         manifest = PlanManifest(
             ticket_id=ticket_id,
             change_id=change_id,
@@ -372,20 +738,21 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
             workflow.restore_plan_draft(change_id, attempt)
             state.phase = "blocked"
             state.phase_usage["blocked_reason"] = preflight.output
+            workflow.save_execution(ticket_id, state)
             return state
         workflow.complete_plan_promotion(change_id)
-        state.ticket_sha256 = ticket_sha256
-        state.ticket_contract_path = _relative(contract_path)
         state.plan_manifest_path = _relative(plan_path)
         state.plan_sha256 = workflow.file_sha256(plan_path)
         state.profile = manifest.profile
         state.phase = "implementing"
+        workflow.save_execution(ticket_id, state)
         return state
-    except (OSError, ValueError, KeyError, ConverterError) as error:
+    except Exception as error:
         if plan_written:
             workflow.restore_plan_draft(change_id, attempt)
         state.phase = "blocked"
         state.phase_usage["blocked_reason"] = str(error)
+        workflow.save_execution(ticket_id, state)
         return state
 
 
