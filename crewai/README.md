@@ -16,7 +16,9 @@ Linear
   ↓
 Requirements Analyst
   ↓
-Software Architect
+Architect: outline
+  ↓
+Architect: una unidad por artefacto
   ↓
 OpenSpec preflight
   ↓
@@ -32,10 +34,10 @@ Approved / blocked
 ```
 
 Las fases persistidas son `planning`, `implementing`, `verifying`,
-`browser_testing`, `reviewing`, `approved` y `blocked`. Cada rol se invoca en
-un CrewAI aislado de una sola tarea y recibe rutas a sus contratos de fase, no
-la conversacion completa de otro rol. Ralph mantiene la cola, el branch, el
-worker y la finalizacion local.
+`browser_testing`, `reviewing`, `approved` y `blocked`. Cada invocacion usa un
+CrewAI aislado de una sola tarea y recibe solo sus entradas de fase, no la
+conversacion completa de otro rol. Ralph mantiene la cola, el branch, el worker
+y la finalizacion local.
 
 Los perfiles de verificacion cerrados son `standard`, `browser`,
 `operational` y `browser_operational`. Todos ejecutan las puertas inmutables
@@ -193,8 +195,13 @@ ZEN_CODER_MODEL=
 ZEN_TESTER_MODEL=
 ZEN_REVIEWER_MODEL=
 
-ZEN_ANALYST_MAX_TOKENS=800
-ZEN_ARCHITECT_MAX_TOKENS=1200
+ZEN_ANALYST_MAX_TOKENS=2000
+ZEN_ARCHITECT_OUTLINE_MAX_TOKENS=4000
+ZEN_ARCHITECT_ARTIFACT_MAX_TOKENS=8000
+ZEN_ARCHITECT_RETRY_MAX_TOKENS=16000
+ZEN_ARCHITECT_LENGTH_RETRIES=1
+ZEN_ARCHITECT_MAX_CONTEXT_REFS=12
+ZEN_ARCHITECT_MAX_CONTEXT_CHARS=48000
 ZEN_CODER_MAX_TOKENS=2500
 ZEN_TESTER_MAX_TOKENS=600
 ZEN_REVIEWER_MAX_TOKENS=800
@@ -237,11 +244,13 @@ ZEN_REVIEWER_MODEL=
 
 Esto permite utilizar modelos económicos para análisis y modelos más potentes para arquitectura o programación.
 
-Los limites predeterminados son Analyst `4`/`800`, Architect `12`/`1200`,
-Programmer `20`/`2500`, Tester `8`/`600` y Reviewer `8`/`800` para
-`max_iter`/`max_tokens`. Tras cada invocacion, el supervisor conserva fase,
-rol, modelo, limites, intento y la carga de uso de CrewAI cuando esta
-disponible, despues de cada invocacion de rol.
+Los limites predeterminados `max_iter`/`max_tokens` son Analyst `4`/`2000`,
+Architect outline `1`/`4000`, Architect artifact `1`/`8000`, Programmer
+`20`/`2500`, Tester `8`/`600` y Reviewer `8`/`800`. Architect usa esfuerzo de
+razonamiento `low`; su unico reintento por longitud usa `16000` tokens.
+El proveedor y el Agent de Architect tienen sus reintentos ocultos
+desactivados (`max_retries=0` y `max_retry_limit=0`): los reintentos descritos
+abajo pertenecen al supervisor.
 
 ---
 
@@ -275,13 +284,19 @@ Para invalidar manualmente la planificacion y volver a `planning`:
 uv run run_crew "$TICKET_ACTIVO" --replan
 ```
 
-`--resume` y `--replan` son mutuamente excluyentes. `--replan` es la unica
-invalidacion manual de planificacion: elimina de forma atomica las referencias
-de contratos de planificacion del estado actual, incluso si esta `blocked`, y
-conserva toda la evidencia de intentos anteriores antes de volver a ejecutar el
-flujo desde `planning`. No garantiza que desaparezca la causa subyacente del
-bloqueo. Un cambio en el hash del ticket invalida la planificacion
-automaticamente.
+`--resume` y `--replan` son mutuamente excluyentes. Durante una planificacion
+interrumpida, `--resume` exige que ExecutionState contenga la ruta exacta del
+checkpoint del intento y el SHA-256 de sus bytes, valida ambos junto con los
+hashes internos del catalogo, contrato, outline y unidades, reutiliza el outline
+y las unidades completas y continua con la primera unidad faltante. Un archivo
+de checkpoint huerfano o una ruta/hash ausente o divergente bloquea la ejecucion
+en vez de adoptar estado. `--resume` no desbloquea un estado `blocked`.
+`--replan` es la unica invalidacion manual de planificacion: elimina de forma
+atomica las referencias de contratos y la ruta/hash del checkpoint actual,
+incluso desde `blocked`, conserva toda la evidencia de intentos anteriores y
+comienza otro intento en `planning`. No
+garantiza que desaparezca la causa subyacente del bloqueo. Un cambio en el hash
+del ticket invalida la planificacion automaticamente.
 
 Por ejemplo:
 
@@ -317,8 +332,11 @@ El coordinador sondea cada 30 segundos por defecto (`CREW_TICKET_WAIT_SECONDS`) 
 El estado de proceso se guarda en `.agent/crew/<ticket>/execution.json`. Los
 artefactos de intentos que deben sobrevivir con el cambio se guardan en
 `openspec/changes/<change-id>/attempts/<attempt>/`: TicketContract,
-PlanManifest, RepairPack, resultado de navegador, ReviewPack, evidencia y
-metricas de uso por invocacion de rol.
+`context-catalog.json`, `planning-checkpoint.json`, PlanManifest, RepairPack,
+resultado de navegador, ReviewPack, evidencia y metricas de uso. Cada llamada
+de Architect conserva evidencia distinta por etapa, unidad e invocacion,
+incluidos estado, limite efectivo, tipo de error y uso crudo cuando existe; una
+llamada fallida nunca es sobrescrita por su reintento.
 
 Estados JSON relevantes:
 
@@ -376,41 +394,51 @@ Su responsabilidad es identificar:
 
 No debe inventar requisitos.
 
-Su resultado es entregado al Architect.
+Su `TicketContract` se persiste antes de iniciar la planificacion de Architect.
 
 ---
 
-# 2. Software Architect
+# 2. Staged Software Architect
 
-El Architect recibe el análisis del ticket y consulta:
+El supervisor convierte las secciones `##` y `###` de `CONTEXT.md` en el
+catalogo persistido
+`openspec/changes/<change-id>/attempts/<attempt>/context-catalog.json`. La
+primera llamada de Architect recibe exactamente el `TicketContract` serializado
+y un indice del catalogo con referencias, titulos y tamanos, pero sin los cuerpos
+de las secciones. Devuelve un `PlanOutline` con una unidad para `proposal.md`,
+`design.md`, `tasks.md` y cada spec requerida.
 
-```text
-CONTEXT.md
-```
+Despues se ejecuta un Crew aislado por cada unidad. Cada llamada recibe
+exactamente el `TicketContract`, el `PlanOutline` validado, la unidad solicitada
+y solo los cuerpos de contexto seleccionados por esa unidad. Cada seleccion
+admite por defecto hasta 12 referencias y 48000 caracteres. Architect no tiene
+tools, delegacion, manager, Flow ni conversacion de llamadas anteriores.
 
-También puede inspeccionar partes relevantes del repositorio.
+El supervisor persiste
+`openspec/changes/<change-id>/attempts/<attempt>/planning-checkpoint.json`
+despues del outline, de cada unidad valida y de cada fallo de artefacto manejado.
+Un `LengthFinishReasonError` directo o envuelto reintenta una sola vez y solo la
+unidad de artefacto fallida, con el presupuesto `16000`; el estado durable evita
+repetir el retry al reiniciar. El outline no recibe reintentos por longitud.
+Durante toda la operacion de planificacion, la respuesta exacta
+`Invalid response from LLM call - None or empty.` admite un unico reintento,
+tambien persistido y ligado al outline o unidad que lo consumio; otros errores o
+mensajes no lo consumen. Ambos reintentos usan semantica de supervisor
+at-most-once: el estado durable cambia de `pending` a `consumed` antes de llamar
+al proveedor. Si el proceso muere antes o durante esa llamada y no alcanza a
+persistir el resultado, el reinicio bloquea por resultado incierto o presupuesto
+agotado y no repite la llamada. Esta eleccion puede perder un reintento, pero
+garantiza que el supervisor nunca exceda el limite configurado sin depender de
+idempotencia del proveedor.
 
-No debe recorrer directorios generados como:
-
-```text
-.venv/
-node_modules/
-.git/
-.next/
-dist/
-build/
-__pycache__/
-```
-
-El Architect crea el cambio OpenSpec.
-
-Por ejemplo:
-
-```text
-dev-5
-```
-
-y genera:
+Solo cuando todas las unidades validan, el supervisor ensambla el `PlanDraft`
+existente y lo pasa por `write_plan_draft()`. La creacion de PlanManifest, el
+preflight, el rollback y la promocion atomica existentes no cambian. Los
+reinicios recuperan cualquier marcador de promocion pendiente al entrar en
+planificacion, antes de validar contratos, catalogo o checkpoint y antes de una
+llamada de Architect. Asi una planificacion posterior que falle temprano no
+puede dejar activos archivos reemplazados parcialmente. Los artefactos activos
+mantienen esta forma:
 
 ```text
 openspec/
@@ -829,13 +857,15 @@ Además se limita:
 * tamaño de salida de comandos
 * tamaño de logs
 
-Los agentes utilizan también:
+Analyst, Programmer, Tester y Reviewer utilizan:
 
 ```python
 respect_context_window=True
 ```
 
-para permitir que CrewAI gestione el crecimiento del contexto.
+para permitir que CrewAI gestione el crecimiento del contexto. Architect usa
+explicitamente `respect_context_window=False`: cada llamada staged recibe
+contexto acotado y debe fallar antes que resumir o perder contenido del plan.
 
 ---
 
@@ -885,6 +915,7 @@ crewai/
         ├── queue.py
         ├── finalizer.py
         ├── models.py
+        ├── planning.py
         ├── evidence.py
         ├── gates.py
         ├── integration_env.py
@@ -929,7 +960,8 @@ Define el pipeline:
 
 ```text
 analysis_task
-architecture_task
+architect_outline_task
+architect_artifact_task
 coding_task
 testing_task
 review_task
@@ -939,7 +971,7 @@ En la ejecucion supervisada cada rol se ejecuta como un CrewAI de una sola
 tarea dentro de una maquina de fases persistente:
 
 ```text
-planning: analyst -> architect -> OpenSpec preflight
+planning: analyst -> architect outline -> una llamada por artefacto -> OpenSpec preflight
 implementing: programmer
 verifying: puertas base
 browser_testing: tester solo para perfiles de navegador
@@ -1141,7 +1173,10 @@ Linear $TICKET_ACTIVO
 Requirements Analyst
         │
         ▼
-Software Architect
+Architect outline
+        │
+        ▼
+Architect artifact units
         │
         ▼
 OpenSpec $CHANGE_ID_ACTIVO

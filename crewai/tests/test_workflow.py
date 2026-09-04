@@ -9,11 +9,18 @@ from crew.gates import GateRun
 from crew.models import (
     AcceptanceCriterion,
     ExecutionState,
+    PlanArtifactUnit,
     PlanDraft,
     PlanDraftSpec,
     PlanManifest,
+    PlanOutline,
+    PlanningCheckpoint,
+    PlanUnitOutline,
+    ProjectContextCatalog,
+    ProjectContextSection,
     TesterResult as BrowserResult,
     TicketContract,
+    canonical_model_sha256,
 )
 
 
@@ -294,12 +301,181 @@ def test_artifact_paths_are_open_spec_attempt_scoped_and_reject_invalid_ids(
     assert workflow.browser_result_path("dev-40", 2) == (
         tmp_path / "openspec/changes/dev-40/attempts/2/browser-result.json"
     )
+    assert workflow.context_catalog_path("dev-40", 2) == (
+        tmp_path / "openspec/changes/dev-40/attempts/2/context-catalog.json"
+    )
+    assert workflow.planning_checkpoint_path("dev-40", 2) == (
+        tmp_path / "openspec/changes/dev-40/attempts/2/planning-checkpoint.json"
+    )
 
     for value in ("../other", "/tmp/other"):
         with pytest.raises(ValueError, match="change ID"):
             workflow.ticket_contract_path(value, 1)
         with pytest.raises(ValueError, match="ticket ID"):
             workflow.execution_path(value)
+
+
+def test_planning_checkpoint_is_atomically_saved_and_reloaded(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    outline = PlanOutline(
+        profile="standard",
+        units=[
+            PlanUnitOutline(artifact="proposal", objective="Propose", context_refs=[]),
+            PlanUnitOutline(artifact="design", objective="Design", context_refs=[]),
+            PlanUnitOutline(artifact="tasks", objective="Task", context_refs=[]),
+            PlanUnitOutline(
+                artifact="spec",
+                capability="crew-supervision",
+                objective="Specify",
+                context_refs=[],
+            ),
+        ],
+        acceptance_map={"AC-001": ["T-001"]},
+    )
+    unit = PlanArtifactUnit(artifact="proposal", content="proposal")
+    catalog = ProjectContextCatalog(
+        source_path="CONTEXT.md",
+        source_sha256="b" * 64,
+        sections=[
+            ProjectContextSection(
+                ref="context-001", heading="## Context", body="body", size=4
+            )
+        ],
+    )
+    checkpoint = PlanningCheckpoint(
+        ticket_contract_sha256=canonical_model_sha256(ticket_contract()),
+        context_catalog_sha256=canonical_model_sha256(catalog),
+        outline_sha256=canonical_model_sha256(outline),
+        outline=outline,
+        units=[unit],
+        unit_sha256={"proposal": canonical_model_sha256(unit)},
+        invocation_status={
+            "proposal": "completed",
+            "design": "pending",
+            "tasks": "pending",
+            "spec:crew-supervision": "pending",
+        },
+    )
+    replaced = []
+    original_replace = workflow.os.replace
+    monkeypatch.setattr(
+        workflow.os,
+        "replace",
+        lambda source, target: replaced.append(target) or original_replace(source, target),
+    )
+    path = workflow.planning_checkpoint_path("dev-40", 3)
+
+    workflow.save_model(path, checkpoint)
+
+    assert replaced == [path]
+    assert workflow.load_model(path, PlanningCheckpoint) == checkpoint
+
+
+def planning_checkpoint_values():
+    outline = PlanOutline(
+        profile="standard",
+        units=[
+            PlanUnitOutline(artifact="proposal", objective="Propose", context_refs=[]),
+            PlanUnitOutline(artifact="design", objective="Design", context_refs=[]),
+            PlanUnitOutline(artifact="tasks", objective="Task", context_refs=[]),
+            PlanUnitOutline(
+                artifact="spec",
+                capability="crew-supervision",
+                objective="Specify",
+                context_refs=[],
+            ),
+        ],
+        acceptance_map={"AC-001": ["T-001"]},
+    )
+    return {
+        "ticket_contract_sha256": "a" * 64,
+        "context_catalog_sha256": "b" * 64,
+        "outline_sha256": canonical_model_sha256(outline),
+        "outline": outline,
+        "invocation_status": {unit.unit_key: "pending" for unit in outline.units},
+    }
+
+
+def test_planning_checkpoint_bounds_length_retry_state_to_outline_units():
+    values = planning_checkpoint_values()
+    values["invocation_status"]["proposal"] = "failed"
+    values["invocation_status"]["design"] = "failed"
+
+    checkpoint = PlanningCheckpoint(
+        **values,
+        length_retry_status={"proposal": "pending", "design": "consumed"},
+    )
+
+    assert checkpoint.length_retry_status == {
+        "proposal": "pending",
+        "design": "consumed",
+    }
+    with pytest.raises(ValidationError, match="unknown unit"):
+        PlanningCheckpoint(**values, length_retry_status={"unknown": "pending"})
+    with pytest.raises(ValidationError, match="length_retry_status"):
+        PlanningCheckpoint(**values, length_retry_status={"proposal": 2})
+
+
+@pytest.mark.parametrize("invocation_status", [None, "pending"])
+def test_planning_checkpoint_rejects_pending_length_retry_without_failed_status(
+    invocation_status,
+):
+    values = planning_checkpoint_values()
+    if invocation_status is None:
+        values["invocation_status"].pop("proposal")
+    else:
+        values["invocation_status"]["proposal"] = invocation_status
+
+    with pytest.raises(ValidationError, match="pending length retry"):
+        PlanningCheckpoint(**values, length_retry_status={"proposal": "pending"})
+
+
+def test_planning_checkpoint_rejects_pending_length_retry_for_stored_completed_unit():
+    values = planning_checkpoint_values()
+    unit = PlanArtifactUnit(artifact="proposal", content="proposal")
+    values["units"] = [unit]
+    values["unit_sha256"] = {"proposal": canonical_model_sha256(unit)}
+    values["invocation_status"]["proposal"] = "completed"
+
+    with pytest.raises(ValidationError, match="pending length retry"):
+        PlanningCheckpoint(**values, length_retry_status={"proposal": "pending"})
+
+
+@pytest.mark.parametrize("invocation_status", [None, "pending"])
+def test_planning_checkpoint_rejects_consumed_length_retry_without_terminal_status(
+    invocation_status,
+):
+    values = planning_checkpoint_values()
+    if invocation_status is None:
+        values["invocation_status"].pop("proposal")
+    else:
+        values["invocation_status"]["proposal"] = invocation_status
+
+    with pytest.raises(ValidationError, match="consumed length retry"):
+        PlanningCheckpoint(**values, length_retry_status={"proposal": "consumed"})
+
+
+def test_planning_checkpoint_accepts_valid_length_retry_status_combinations():
+    for retry_status, invocation_status, stored in [
+        ("pending", "failed", False),
+        ("consumed", "failed", False),
+        ("consumed", "completed", True),
+    ]:
+        values = planning_checkpoint_values()
+        values["invocation_status"]["proposal"] = invocation_status
+        if stored:
+            unit = PlanArtifactUnit(artifact="proposal", content="proposal")
+            values["units"] = [unit]
+            values["unit_sha256"] = {"proposal": canonical_model_sha256(unit)}
+
+        checkpoint = PlanningCheckpoint(
+            **values,
+            length_retry_status={"proposal": retry_status},
+        )
+
+        assert checkpoint.length_retry_status == {"proposal": retry_status}
 
 
 def test_save_execution_replaces_state_atomically_and_rejects_non_json_data(

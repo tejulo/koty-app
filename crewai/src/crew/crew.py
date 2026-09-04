@@ -1,4 +1,5 @@
 import os
+from typing import Literal
 
 from crewai import (
     Agent,
@@ -18,7 +19,8 @@ from crewai.tools.tool_failure import (
 )
 
 from .models import (
-    PlanDraft,
+    PlanArtifactUnit,
+    PlanOutline,
     ReviewVerdict,
     TesterResult,
     TicketContract,
@@ -50,6 +52,8 @@ def _zen_llm(
     model_env: str,
     max_tokens_env: str,
     default_max_tokens: int,
+    reasoning_effort: Literal["none", "low", "medium", "high"] | None = None,
+    max_retries: int | None = None,
 ) -> LLM:
     model = os.environ.get(model_env)
     api_key = os.environ.get(
@@ -66,21 +70,25 @@ def _zen_llm(
             "Falta OPENCODE_API_KEY"
         )
 
-    return LLM(
-        model=model,
-        base_url=os.environ.get(
+    options = {
+        "model": model,
+        "base_url": os.environ.get(
             "ZEN_BASE_URL",
             DEFAULT_ZEN_BASE_URL,
         ),
-        api_key=api_key,
-        temperature=0.2,
-        max_tokens=int(
+        "api_key": api_key,
+        "temperature": 0.2,
+        "reasoning_effort": reasoning_effort,
+        "max_tokens": int(
             os.environ.get(
                 max_tokens_env,
                 default_max_tokens,
             )
         ),
-    )
+    }
+    if max_retries is not None:
+        options["max_retries"] = max_retries
+    return LLM(**options)
 
 
 @CrewBase
@@ -109,20 +117,22 @@ class KotyAppCrew:
             ),
         )
 
-    @agent
-    def arquitect(self) -> Agent:
+    def _architect(self, max_tokens_env: str, default_max_tokens: int) -> Agent:
         return Agent(
             config=self.agents_config["arquitect"],
             llm=_zen_llm(
                 "ZEN_ARCHITECT_MODEL",
-                "ZEN_ARCHITECT_MAX_TOKENS",
-                4000,
+                max_tokens_env,
+                default_max_tokens,
+                reasoning_effort="low",
+                max_retries=0,
             ),
             tools=[],
             verbose=VERBOSE,
             allow_delegation=False,
-            respect_context_window=True,
+            respect_context_window=False,
             max_iter=1,
+            max_retry_limit=0,
         )
 
     @agent
@@ -194,13 +204,28 @@ class KotyAppCrew:
             output_pydantic=TicketContract,
         )
 
-    @task
-    def architecture_task(self) -> Task:
+    def architect_outline_task(self) -> Task:
+        agent = self._architect("ZEN_ARCHITECT_OUTLINE_MAX_TOKENS", 4000)
         return Task(
-            config=self.tasks_config[
-                "architecture_task"
-            ],
-            output_pydantic=PlanDraft,
+            name="architect_outline_task",
+            config=self.tasks_config["architect_outline_task"],
+            agent=agent,
+            output_pydantic=PlanOutline,
+        )
+
+    def architect_artifact_task(self, *, retry: bool = False) -> Task:
+        max_tokens_env = (
+            "ZEN_ARCHITECT_RETRY_MAX_TOKENS"
+            if retry
+            else "ZEN_ARCHITECT_ARTIFACT_MAX_TOKENS"
+        )
+        default_max_tokens = 16000 if retry else 8000
+        agent = self._architect(max_tokens_env, default_max_tokens)
+        return Task(
+            name="architect_artifact_task",
+            config=self.tasks_config["architect_artifact_task"],
+            agent=agent,
+            output_pydantic=PlanArtifactUnit,
         )
 
     @task
@@ -236,11 +261,18 @@ class KotyAppCrew:
             [self.analysis_task()],
         )
 
-    @crew
-    def architect_crew(self) -> Crew:
+    def architect_outline_crew(self) -> Crew:
+        task = self.architect_outline_task()
         return self._crew(
-            [self.arquitect()],
-            [self.architecture_task()],
+            [task.agent],
+            [task],
+        )
+
+    def architect_artifact_crew(self, *, retry: bool = False) -> Crew:
+        task = self.architect_artifact_task(retry=retry)
+        return self._crew(
+            [task.agent],
+            [task],
         )
 
     @crew
@@ -265,36 +297,10 @@ class KotyAppCrew:
         )
 
     @crew
-    def planning_crew(self) -> Crew:
-        return self._crew(
-            [self.analyst(), self.arquitect()],
-            [self.analysis_task(), self.architecture_task()],
-        )
-
-    @crew
     def delivery_crew(self) -> Crew:
         return self._crew(
             [self.programer(), self.tester(), self.reviewer()],
             [self.coding_task(), self.testing_task(), self.review_task()],
-        )
-
-    @crew
-    def crew(self) -> Crew:
-        return self._crew(
-            [
-                self.analyst(),
-                self.arquitect(),
-                self.programer(),
-                self.tester(),
-                self.reviewer(),
-            ],
-            [
-                self.analysis_task(),
-                self.architecture_task(),
-                self.coding_task(),
-                self.testing_task(),
-                self.review_task(),
-            ],
         )
 
     def _crew(self, agents, tasks) -> Crew:

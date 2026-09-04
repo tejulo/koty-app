@@ -13,25 +13,50 @@ analysis_task:
   agent: analyst
 
 
-architecture_task:
+architect_outline_task:
   description: >
-    Diseña un cambio OpenSpec completo usando este TicketContract JSON:
+    Diseña exclusivamente el outline de un cambio OpenSpec usando este
+    TicketContract JSON:
     {ticket_contract_json}
 
-    Contexto del proyecto:
+    Índice de contexto sin cuerpos:
+    {context_index}
+
+    Devuelve exclusivamente un PlanOutline con profile, acceptance_map y una
+    PlanUnitOutline para proposal, design, tasks y cada spec requerida. Cada
+    unidad selecciona solo referencias conocidas del índice. No uses
+    herramientas, no escribas archivos y no calcules hashes: el supervisor
+    persiste y valida el resultado.
+  expected_output: >
+    Un PlanOutline válido.
+
+
+architect_artifact_task:
+  description: >
+    Produce exclusivamente la unidad de artefacto solicitada usando este
+    TicketContract JSON:
+    {ticket_contract_json}
+
+    PlanOutline validado:
+    {plan_outline_json}
+
+    PlanUnitOutline solicitado:
+    {plan_unit_outline_json}
+
+    Contexto seleccionado para esta unidad:
     {project_context}
 
-    Devuelve exclusivamente un PlanDraft con proposal, design, tasks, al menos
-    una spec y acceptance_map. design debe declarar exactamente un
-    verification_profile válido (standard, browser, operational o
-    browser_operational) y Browser E2E: required o not_required. Cada spec debe
-    usar ## ADDED Requirements, MODIFIED Requirements, REMOVED Requirements o
-    RENAMED Requirements, y cada requisito debe contener al menos un
-    #### Scenario:. No uses herramientas, no escribas archivos y no calcules hashes:
-    el supervisor persiste y valida los artefactos.
+    Devuelve un PlanArtifactUnit que corresponda exactamente al artifact y
+    capability solicitados. Si es design, debe declarar exactamente un
+    verification_profile igual a PlanOutline.profile y declarar explícitamente
+    Browser E2E: required o Browser E2E: not_required. Si es spec, debe usar los
+    encabezados OpenSpec exactos ## ADDED Requirements, ## MODIFIED Requirements,
+    ## REMOVED Requirements o ## RENAMED Requirements, y cada requisito debe
+    contener al menos un escenario encabezado #### Scenario:. No uses
+    herramientas, no escribas archivos y no calcules hashes: el supervisor
+    persiste y valida el resultado.
   expected_output: >
-    Un PlanDraft válido.
-  agent: arquitect
+    Un PlanArtifactUnit válido.
 
 
 coding_task:
