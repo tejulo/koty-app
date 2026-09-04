@@ -15,23 +15,22 @@ analysis_task:
 
 architecture_task:
   description: >
-    Lee el TicketContract persistido en '{ticket_contract_path}'. Crea o
-    actualiza proposal.md, design.md, tasks.md y al menos una spec bajo
-    openspec/changes/{change_id}/. design.md debe declarar exactamente un
+    Diseña un cambio OpenSpec completo usando este TicketContract JSON:
+    {ticket_contract_json}
+
+    Contexto del proyecto:
+    {project_context}
+
+    Devuelve exclusivamente un PlanDraft con proposal, design, tasks, al menos
+    una spec y acceptance_map. design debe declarar exactamente un
     verification_profile válido (standard, browser, operational o
-    browser_operational) y Browser E2E: required o not_required. Crea el
-    PlanManifest para ese contrato en '{plan_manifest_path}' con
-    ticket_id='{ticket_id}', change_id='{change_id}',
-    ticket_sha256='{ticket_sha256}',
-    ticket_contract_sha256='{ticket_contract_sha256}' y base_gates='{base_gates}'.
-    Los artefactos deben existir físicamente antes de responder. El manifiesto
-    debe usar exactamente esta forma:
-    {"artifacts": {"proposal.md": "<sha256>", "design.md": "<sha256>", "tasks.md": "<sha256>", "specs/<capability>/spec.md": "<sha256>"}, "acceptance_map": {"AC-001": ["T-001"]}}.
-    profile debe ser exactamente el verification_profile declarado en design.md.
-    artifacts contiene solo ruta: sha256 y acceptance_map solo AC-*: [task_id].
-    No uses objetos anidados ni alias como proposal, design, tasks o spec.
+    browser_operational) y Browser E2E: required o not_required. Cada spec debe
+    usar ## ADDED Requirements, MODIFIED Requirements, REMOVED Requirements o
+    RENAMED Requirements, y cada requisito debe contener al menos un
+    #### Scenario:. No uses herramientas, no escribas archivos y no calcules hashes:
+    el supervisor persiste y valida los artefactos.
   expected_output: >
-    Un PlanManifest válido.
+    Un PlanDraft válido.
   agent: arquitect
 
 

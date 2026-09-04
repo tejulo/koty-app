@@ -148,6 +148,28 @@ def test_finalizer_rejects_profile_that_differs_from_active_design(tmp_path, mon
         finalizer._check_review_pack("DEV-40", "dev-40")
 
 
+def test_finalizer_accepts_bullet_profile_declaration(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    design = tmp_path / "openspec/changes/dev-40/design.md"
+    design.parent.mkdir(parents=True)
+    design.write_text("- verification_profile: standard\n", encoding="utf-8")
+
+    assert finalizer._selected_profile("dev-40") == "standard"
+
+
+def test_finalizer_rejects_multiple_profile_declarations(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    design = tmp_path / "openspec/changes/dev-40/design.md"
+    design.parent.mkdir(parents=True)
+    design.write_text(
+        "verification_profile: standard\nverification_profile: operational\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="exactly one"):
+        finalizer._selected_profile("dev-40")
+
+
 @pytest.mark.parametrize("mutation", ["remove", "modify"])
 def test_finalizer_rejects_stale_gate_evidence(tmp_path, monkeypatch, mutation):
     _write_current_review_artifacts(tmp_path, monkeypatch)

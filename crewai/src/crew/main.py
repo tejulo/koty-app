@@ -9,6 +9,7 @@ from typing import TypeVar
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from crewai.utilities.converter import ConverterError
 
 from .crew import KotyAppCrew
 from .evidence import diagnose_integration_failure
@@ -17,6 +18,7 @@ from .linear_api import get_issue
 from .models import (
     ExecutionState,
     CrewResult,
+    PlanDraft,
     PlanManifest,
     RepairPack,
     ReviewPack,
@@ -37,8 +39,8 @@ os.environ["CREWAI_TRACING_ENABLED"] = "false"
 os.environ["OTEL_SDK_DISABLED"] = "true"
 
 ROLE_LIMITS = {
-    "analyst": ("ZEN_ANALYST_MODEL", "ZEN_ANALYST_MAX_TOKENS", 4, 800),
-    "architect": ("ZEN_ARCHITECT_MODEL", "ZEN_ARCHITECT_MAX_TOKENS", 12, 1200),
+    "analyst": ("ZEN_ANALYST_MODEL", "ZEN_ANALYST_MAX_TOKENS", 4, 2000),
+    "architect": ("ZEN_ARCHITECT_MODEL", "ZEN_ARCHITECT_MAX_TOKENS", 1, 4000),
     "programmer": ("ZEN_CODER_MODEL", "ZEN_CODER_MAX_TOKENS", 20, 2500),
     "tester": ("ZEN_TESTER_MODEL", "ZEN_TESTER_MAX_TOKENS", 8, 600),
     "reviewer": ("ZEN_REVIEWER_MODEL", "ZEN_REVIEWER_MAX_TOKENS", 8, 800),
@@ -50,7 +52,7 @@ ROLE_CREWS = {
     "tester": "tester_crew",
     "reviewer": "reviewer_crew",
 }
-PROFILE_PATTERN = re.compile(r"^verification_profile:\s*(\S+)\s*$", re.MULTILINE)
+EMPTY_ARCHITECT_RESPONSE = "Invalid response from LLM call - None or empty."
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
@@ -118,11 +120,23 @@ def _attempt(state: ExecutionState) -> int:
 
 
 def _selected_profile(change_id: str) -> str:
-    design = active_change(change_id) / "design.md"
-    match = PROFILE_PATTERN.search(design.read_text(encoding="utf-8")) if design.is_file() else None
-    if not match or match.group(1) not in {"standard", "browser", "operational", "browser_operational"}:
-        raise ValueError("OpenSpec design has no valid verification_profile")
-    return match.group(1)
+    return workflow.selected_profile(change_id)
+
+
+def _project_context() -> str:
+    context = workflow.PROJECT_ROOT / "CONTEXT.md"
+    return context.read_text(encoding="utf-8") if context.is_file() else ""
+
+
+def _kickoff_architect(state: ExecutionState, inputs: dict[str, str]) -> object:
+    for retry in range(2):
+        try:
+            return kickoff_role("architect", inputs=inputs)
+        except ValueError as error:
+            if str(error) != EMPTY_ARCHITECT_RESPONSE or retry == 1:
+                raise
+            state.phase_usage["planning:architect_empty_response_retries"] = retry + 1
+    raise RuntimeError("Architect retry loop exited unexpectedly")
 
 
 def _as_model(output: object, model_type: type[ModelT]) -> ModelT:
@@ -300,6 +314,7 @@ def _save_repair_pack(
 
 
 def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
+    plan_written = False
     try:
         attempt = _attempt(state)
         ticket_sha256 = state.ticket_sha256 or current_ticket_sha256(ticket_id)
@@ -319,22 +334,30 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
         workflow.save_model(contract_path, contract)
 
         plan_path = workflow.plan_manifest_path(change_id, attempt)
-        architect = kickoff_role(
-            "architect",
-            inputs={
-                "ticket_contract_path": _relative(contract_path),
-                "plan_manifest_path": _relative(plan_path),
-                "ticket_id": ticket_id,
-                "change_id": change_id,
-                "ticket_sha256": ticket_sha256,
-                "ticket_contract_sha256": workflow.file_sha256(contract_path),
-                "base_gates": ",".join(workflow.BASE_GATES),
+        architect = _kickoff_architect(
+            state,
+            {
+                "ticket_contract_json": contract.model_dump_json(),
+                "project_context": _project_context(),
             },
         )
         _record_usage(state, "architect", architect)
-        manifest = _as_model(architect, PlanManifest)
-        profile = _selected_profile(change_id)
-        artifact_paths = {name: active_change(change_id) / name for name in manifest.artifacts}
+        draft = _as_model(architect, PlanDraft)
+        profile = workflow.profile_from_design(draft.design)
+        if draft.profile != profile:
+            raise ValueError("PlanDraft profile does not match design")
+        artifact_paths = workflow.write_plan_draft(change_id, attempt, draft)
+        plan_written = True
+        manifest = PlanManifest(
+            ticket_id=ticket_id,
+            change_id=change_id,
+            ticket_sha256=ticket_sha256,
+            ticket_contract_sha256=workflow.file_sha256(contract_path),
+            artifacts={name: workflow.file_sha256(path) for name, path in artifact_paths.items()},
+            profile=draft.profile,
+            acceptance_map=draft.acceptance_map,
+            base_gates=list(workflow.BASE_GATES),
+        )
         workflow.validate_plan_manifest(
             manifest,
             [criterion.id for criterion in contract.acceptance_criteria],
@@ -346,9 +369,11 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
         workflow.save_model(plan_path, manifest)
         preflight = _run_gate("openspec", change_id)
         if not preflight.passed:
+            workflow.restore_plan_draft(change_id, attempt)
             state.phase = "blocked"
             state.phase_usage["blocked_reason"] = preflight.output
             return state
+        workflow.complete_plan_promotion(change_id)
         state.ticket_sha256 = ticket_sha256
         state.ticket_contract_path = _relative(contract_path)
         state.plan_manifest_path = _relative(plan_path)
@@ -356,7 +381,9 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
         state.profile = manifest.profile
         state.phase = "implementing"
         return state
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, ValueError, KeyError, ConverterError) as error:
+        if plan_written:
+            workflow.restore_plan_draft(change_id, attempt)
         state.phase = "blocked"
         state.phase_usage["blocked_reason"] = str(error)
         return state

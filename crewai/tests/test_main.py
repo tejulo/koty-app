@@ -4,15 +4,20 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import crew.main as main
 import crew.finalizer as finalizer
 import crew.workflow as workflow
 import crew.tools.custom_tool as tools
+from crewai.utilities.converter import ConverterError
 from crew.gates import GateRun
 from crew.models import (
     AcceptanceCriterion,
     CrewResult,
     ExecutionState,
+    PlanDraft,
+    PlanDraftSpec,
     PlanManifest,
     ReviewVerdict,
     TesterResult,
@@ -206,7 +211,7 @@ def test_verification_runs_each_immutable_gate_once_before_creating_repair_pack(
     assert pack.evidence_id == "lint-evidence"
 
 
-def test_planning_creates_artifacts_before_reading_the_profile(tmp_path, monkeypatch):
+def test_planning_persists_architect_draft_and_builds_manifest(tmp_path, monkeypatch):
     monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
     change = tmp_path / "openspec/changes/dev-40"
     calls = []
@@ -217,35 +222,28 @@ def test_planning_creates_artifacts_before_reading_the_profile(tmp_path, monkeyp
         calls.append((role, inputs))
         if role == "analyst":
             return SimpleNamespace(pydantic=contract())
-        for name, content in {
-            "proposal.md": "proposal",
-            "design.md": "verification_profile: operational",
-            "tasks.md": "tasks",
-            "specs/crew-supervision/spec.md": "spec",
-        }.items():
-            path = change / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-        contract_path = tmp_path / inputs["ticket_contract_path"]
-        manifest = PlanManifest(
-            ticket_id="DEV-40",
-            change_id="dev-40",
-            ticket_sha256=TICKET_HASH,
-            ticket_contract_sha256=workflow.file_sha256(contract_path),
-            artifacts={
-                name: workflow.file_sha256(change / name)
-                for name in ("proposal.md", "design.md", "tasks.md", "specs/crew-supervision/spec.md")
-            },
-            profile="operational",
-            acceptance_map={"AC-001": ["4.1"]},
+        return SimpleNamespace(
+            pydantic=PlanDraft(
+                profile="operational",
+                proposal="proposal",
+                design="- verification_profile: operational\n",
+                tasks="tasks",
+                specs=[PlanDraftSpec(capability="crew-supervision", content="spec")],
+                acceptance_map={"AC-001": ["4.1"]},
+            )
         )
-        return SimpleNamespace(pydantic=manifest)
 
     monkeypatch.setattr(main, "kickoff_role", kickoff)
 
     result = main.run_planning("DEV-40", "dev-40", ExecutionState(ticket_id="DEV-40", change_id="dev-40"))
 
     assert result.phase == "implementing"
+    assert (change / "specs/crew-supervision/spec.md").is_file()
+    persisted_manifest = workflow.load_model(tmp_path / result.plan_manifest_path, PlanManifest)
+    assert persisted_manifest.artifacts == {
+        name: workflow.file_sha256(change / name)
+        for name in ("proposal.md", "design.md", "tasks.md", "specs/crew-supervision/spec.md")
+    }
     assert calls[0] == (
         "analyst",
         {
@@ -257,17 +255,191 @@ def test_planning_creates_artifacts_before_reading_the_profile(tmp_path, monkeyp
     assert calls[1] == (
         "architect",
         {
-            "ticket_contract_path": "openspec/changes/dev-40/attempts/1/ticket-contract.json",
-            "plan_manifest_path": "openspec/changes/dev-40/attempts/1/plan-manifest.json",
-            "ticket_id": "DEV-40",
-            "change_id": "dev-40",
-            "ticket_sha256": TICKET_HASH,
-            "ticket_contract_sha256": workflow.file_sha256(
-                tmp_path / "openspec/changes/dev-40/attempts/1/ticket-contract.json"
-            ),
-            "base_gates": ",".join(workflow.BASE_GATES),
+            "ticket_contract_json": contract().model_dump_json(),
+            "project_context": "",
         },
     )
+
+
+def test_planning_restores_the_active_plan_when_openspec_preflight_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    change = tmp_path / "openspec/changes/dev-40"
+    for name, content in {
+        "proposal.md": "old proposal",
+        "design.md": "verification_profile: standard\n",
+        "tasks.md": "old tasks",
+        "specs/old/spec.md": "old spec",
+    }.items():
+        path = change / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(main, "current_ticket_sha256", lambda _: TICKET_HASH)
+    monkeypatch.setattr(main, "_run_gate", lambda *_: GateRun("openspec", False, "open-evidence", "invalid"))
+
+    def kickoff(role, **_):
+        if role == "analyst":
+            return SimpleNamespace(pydantic=contract())
+        return SimpleNamespace(
+            pydantic=PlanDraft(
+                profile="operational",
+                proposal="new proposal",
+                design="verification_profile: operational\n",
+                tasks="new tasks",
+                specs=[PlanDraftSpec(capability="crew-supervision", content="new spec")],
+                acceptance_map={"AC-001": ["4.1"]},
+            )
+        )
+
+    monkeypatch.setattr(main, "kickoff_role", kickoff)
+
+    result = main.run_planning("DEV-40", "dev-40", ExecutionState(ticket_id="DEV-40", change_id="dev-40"))
+
+    assert result.phase == "blocked"
+    assert (change / "proposal.md").read_text(encoding="utf-8") == "old proposal"
+    assert (change / "specs/old/spec.md").read_text(encoding="utf-8") == "old spec"
+    assert not (change / "specs/crew-supervision/spec.md").exists()
+
+
+def test_planning_rejects_an_invalid_draft_without_replacing_the_active_plan(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    proposal = tmp_path / "openspec/changes/dev-40/proposal.md"
+    proposal.parent.mkdir(parents=True)
+    proposal.write_text("old proposal", encoding="utf-8")
+    monkeypatch.setattr(main, "current_ticket_sha256", lambda _: TICKET_HASH)
+
+    def kickoff(role, **_):
+        if role == "analyst":
+            return SimpleNamespace(pydantic=contract())
+        return SimpleNamespace(
+            pydantic=PlanDraft(
+                profile="operational",
+                proposal="new proposal",
+                design="missing profile",
+                tasks="new tasks",
+                specs=[PlanDraftSpec(capability="crew-supervision", content="new spec")],
+                acceptance_map={"AC-001": ["4.1"]},
+            )
+        )
+
+    monkeypatch.setattr(main, "kickoff_role", kickoff)
+
+    result = main.run_planning("DEV-40", "dev-40", ExecutionState(ticket_id="DEV-40", change_id="dev-40"))
+
+    assert result.phase == "blocked"
+    assert proposal.read_text(encoding="utf-8") == "old proposal"
+
+
+def test_planning_rejects_a_profile_mismatch_before_staging(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(main, "current_ticket_sha256", lambda _: TICKET_HASH)
+
+    def kickoff(role, **_):
+        if role == "analyst":
+            return SimpleNamespace(pydantic=contract())
+        return SimpleNamespace(
+            pydantic=PlanDraft(
+                profile="operational",
+                proposal="proposal",
+                design="verification_profile: standard\n",
+                tasks="tasks",
+                specs=[PlanDraftSpec(capability="crew-supervision", content="spec")],
+                acceptance_map={"AC-001": ["4.1"]},
+            )
+        )
+
+    monkeypatch.setattr(main, "kickoff_role", kickoff)
+    monkeypatch.setattr(
+        workflow,
+        "write_plan_draft",
+        lambda *_: (_ for _ in ()).throw(AssertionError("must not write")),
+    )
+
+    result = main.run_planning("DEV-40", "dev-40", ExecutionState(ticket_id="DEV-40", change_id="dev-40"))
+
+    assert result.phase == "blocked"
+    assert result.phase_usage["blocked_reason"] == "PlanDraft profile does not match design"
+
+
+def test_planning_retries_an_empty_architect_response(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(main, "current_ticket_sha256", lambda _: TICKET_HASH)
+    monkeypatch.setattr(main, "_run_gate", lambda *_: GateRun("openspec", True, "open-evidence", ""))
+    monkeypatch.setenv("MAX_ARCHITECT_EMPTY_RESPONSE_RETRIES", "1")
+    calls = []
+
+    def kickoff(role, **_):
+        calls.append(role)
+        if role == "analyst":
+            return SimpleNamespace(pydantic=contract())
+        if calls.count("architect") == 1:
+            raise ValueError("Invalid response from LLM call - None or empty.")
+        return SimpleNamespace(
+            pydantic=PlanDraft(
+                profile="standard",
+                proposal="proposal",
+                design="verification_profile: standard\n",
+                tasks="tasks",
+                specs=[PlanDraftSpec(capability="crew-supervision", content="spec")],
+                acceptance_map={"AC-001": ["4.1"]},
+            )
+        )
+
+    monkeypatch.setattr(main, "kickoff_role", kickoff)
+
+    result = main.run_planning("DEV-40", "dev-40", ExecutionState(ticket_id="DEV-40", change_id="dev-40"))
+
+    assert result.phase == "implementing"
+    assert calls == ["analyst", "architect", "architect"]
+    assert result.phase_usage["planning:architect_empty_response_retries"] == 1
+
+
+def test_planning_retries_an_empty_architect_response_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(main, "current_ticket_sha256", lambda _: TICKET_HASH)
+    monkeypatch.setattr(main, "_run_gate", lambda *_: GateRun("openspec", True, "open-evidence", ""))
+    monkeypatch.setenv("MAX_ARCHITECT_EMPTY_RESPONSE_RETRIES", "3")
+    calls = []
+
+    def kickoff(role, **_):
+        calls.append(role)
+        if role == "analyst":
+            return SimpleNamespace(pydantic=contract())
+        raise ValueError("Invalid response from LLM call - None or empty.")
+
+    monkeypatch.setattr(main, "kickoff_role", kickoff)
+
+    result = main.run_planning("DEV-40", "dev-40", ExecutionState(ticket_id="DEV-40", change_id="dev-40"))
+
+    assert result.phase == "blocked"
+    assert calls == ["analyst", "architect", "architect"]
+
+
+def test_selected_profile_rejects_multiple_declarations(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    design = tmp_path / "openspec/changes/dev-40/design.md"
+    design.parent.mkdir(parents=True)
+    design.write_text(
+        "verification_profile: standard\nverification_profile: browser\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="exactly one"):
+        main._selected_profile("dev-40")
+
+
+def test_planning_blocks_when_crewai_cannot_convert_a_contract(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(main, "current_ticket_sha256", lambda _: TICKET_HASH)
+    monkeypatch.setattr(
+        main,
+        "kickoff_role",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ConverterError("invalid contract")),
+    )
+
+    result = main.run_planning("DEV-40", "dev-40", ExecutionState(ticket_id="DEV-40", change_id="dev-40"))
+
+    assert result.phase == "blocked"
+    assert result.phase_usage["blocked_reason"] == "invalid contract"
 
 
 def test_phase_usage_is_serializable_and_records_configured_limits(tmp_path, monkeypatch):

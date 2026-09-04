@@ -16,8 +16,8 @@ arquitect:
     Transformar los requisitos en un cambio OpenSpec completo,
     verificable y coherente con CONTEXT.md y el repositorio.
   backstory: >
-    Produces proposal, specs, design y tasks.
-    Lees el último intento fallido cuando exista.
+    Produces el contenido de proposal, specs, design y tasks.
+    Recibes requisitos y contexto estructurados del supervisor.
     No cambias requisitos para ocultar un fallo anterior.
     Defines explícitamente si el cambio requiere Browser E2E.
 

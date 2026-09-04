@@ -18,7 +18,7 @@ from crewai.tools.tool_failure import (
 )
 
 from .models import (
-    PlanManifest,
+    PlanDraft,
     ReviewVerdict,
     TesterResult,
     TicketContract,
@@ -95,7 +95,7 @@ class KotyAppCrew:
             llm=_zen_llm(
                 "ZEN_ANALYST_MODEL",
                 "ZEN_ANALYST_MAX_TOKENS",
-                800,
+                2000,
             ),
             tools=[
                 buscar_tarea_linear,
@@ -116,17 +116,13 @@ class KotyAppCrew:
             llm=_zen_llm(
                 "ZEN_ARCHITECT_MODEL",
                 "ZEN_ARCHITECT_MAX_TOKENS",
-                1200,
+                4000,
             ),
-            tools=[
-                leer_archivo_raiz,
-                listar_archivos_raiz,
-                escribir_archivo_raiz,
-            ],
+            tools=[],
             verbose=VERBOSE,
             allow_delegation=False,
             respect_context_window=True,
-            max_iter=12,
+            max_iter=1,
         )
 
     @agent
@@ -204,7 +200,7 @@ class KotyAppCrew:
             config=self.tasks_config[
                 "architecture_task"
             ],
-            output_pydantic=PlanManifest,
+            output_pydantic=PlanDraft,
         )
 
     @task

@@ -21,7 +21,8 @@ Attempt artifacts are retained under
 | Artifact | Producer | Required hash relationship |
 | --- | --- | --- |
 | `ticket-contract.json` | Analyst | Contains ticket ID, change ID, source ticket hash, and `AC-*` criteria. |
-| `plan-manifest.json` | Architect | References the TicketContract hash and hashes of proposal, design, tasks, and every OpenSpec spec; maps every `AC-*` to task IDs. |
+| `plan-manifest.json` | Supervisor | References the TicketContract hash and hashes of proposal, design, tasks, and every OpenSpec spec; maps every `AC-*` to task IDs. |
+| `previous-plan/` | Supervisor | Snapshot of active proposal, design, tasks, and specs before a replan replaces them. |
 | `task-completion.json` | Supervisor | Records a successful Programmer phase against the original `tasks.md` path and hash without modifying the planned checklist. |
 | `repair-pack.json` | Supervisor | References the current plan hash, failing evidence hash, and evidence paths without embedding full logs. |
 | `browser-result.json` | Tester or supervisor | References the current plan hash and records passed, failed, or deterministic skipped status. |
@@ -49,10 +50,11 @@ The selected profile is a closed enum recorded in the active change's
 
 verification_profile: operational
 
-DEV-40 selects `operational`. Architect records the selected value in the
-active change design as `verification_profile: operational`; PlanManifest and
+DEV-40 selects `operational`. Architect includes the selected value in the
+PlanDraft design content as exactly one `verification_profile: operational`;
+the supervisor persists it to the active change. PlanManifest and
 ExecutionState must repeat that exact value. For every ticket, planning fails
-when this design field is missing or outside the closed enum. Before executing
+when this design field is missing, repeated, or outside the closed enum. Before executing
 any base gate or selecting Tester, the supervisor rejects a missing profile, a
 PlanManifest or ExecutionState profile that differs from the design value, or a
 manifest whose declared base-gate list differs from the immutable sequence.
@@ -66,7 +68,7 @@ only for `browser` and `browser_operational`.
 
 | Current phase | Event | Next phase | Required action |
 | --- | --- | --- | --- |
-| `planning` | TicketContract and PlanManifest validate; OpenSpec preflight passes | `implementing` | Persist both contracts and hashes. |
+| `planning` | TicketContract and PlanDraft validate; OpenSpec preflight passes | `implementing` | Supervisor persists OpenSpec artifacts, PlanManifest, and hashes. |
 | `implementing` | Programmer completes | `verifying` | Persist TaskCompletion, Programmer usage, and the original `tasks.md` hash. |
 | `verifying` | All six base gates pass | `browser_testing` or `reviewing` | Select browser phase only for browser profiles. |
 | `verifying` | A recoverable base gate fails | `implementing` | Create RepairPack; only Programmer is eligible for the next LLM invocation. |
@@ -80,17 +82,27 @@ only for `browser` and `browser_operational`.
 
 `MAX_TICKET_ATTEMPTS` counts Programmer repair attempts only.
 `MAX_INFRASTRUCTURE_ATTEMPTS` retains its existing infrastructure-only meaning.
+Planning retries `Invalid response from LLM call - None or empty.` from
+Architect exactly once before blocking.
 `--resume` continues the persisted phase without invalidating a valid plan.
 
 ## Role Isolation and Limits
 
-Each role is a one-task CrewAI invocation and consumes only the paths to its
-phase-specific contracts. Analyst produces TicketContract; Architect reads it
-and produces PlanManifest; Programmer reads PlanManifest and the current
-RepairPack; Tester receives browser inputs only when required; Reviewer reads
-ReviewPack rather than other roles' conversations. Default limits are Analyst
-`4`/`800`, Architect `12`/`1200`, Programmer `20`/`2500`, Tester `8`/`600`,
-and Reviewer `8`/`800` for `max_iter`/`max_tokens`.
+Each role is a one-task CrewAI invocation. Analyst produces TicketContract;
+Architect receives the serialized contract and project context, then produces
+PlanDraft content without tools; the supervisor writes and hashes that content
+as the active OpenSpec artifacts and PlanManifest. Programmer reads
+PlanManifest and the current RepairPack; Tester receives browser inputs only
+when required; Reviewer reads ReviewPack rather than other roles'
+conversations. Default limits are Analyst `4`/`2000`, Architect `1`/`4000`,
+Programmer `20`/`2500`, Tester `8`/`600`, and Reviewer `8`/`800` for
+`max_iter`/`max_tokens`.
+
+The supervisor stages each PlanDraft before replacing active plan artifacts.
+It validates the draft profile before replacement and restores the
+attempt-scoped `previous-plan/` snapshot if manifest validation or OpenSpec
+preflight fails. A durable promotion marker restores that snapshot before a
+subsequent replan if the process is interrupted during replacement.
 
 ## Verification Strategy - Browser E2E: not_required
 

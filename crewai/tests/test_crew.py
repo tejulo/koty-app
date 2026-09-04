@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from crew.crew import KotyAppCrew
 from crew.models import (
-    PlanManifest,
+    PlanDraft,
     ReviewVerdict,
     TesterResult as BrowserTesterResult,
     TicketContract,
@@ -15,8 +15,8 @@ from crewai.utilities.constants import NOT_SPECIFIED
 
 
 DOCUMENTED_TOKEN_DEFAULTS = {
-    "ZEN_ANALYST_MAX_TOKENS": "800",
-    "ZEN_ARCHITECT_MAX_TOKENS": "1200",
+    "ZEN_ANALYST_MAX_TOKENS": "2000",
+    "ZEN_ARCHITECT_MAX_TOKENS": "4000",
     "ZEN_CODER_MAX_TOKENS": "2500",
     "ZEN_TESTER_MAX_TOKENS": "600",
     "ZEN_REVIEWER_MAX_TOKENS": "800",
@@ -90,6 +90,12 @@ def test_arquitect_y_programer_no_reciben_tools_de_mutacion_linear(
     )
 
 
+def test_architect_has_no_filesystem_tools(monkeypatch):
+    configure_models(monkeypatch)
+
+    assert KotyAppCrew().arquitect().tools == []
+
+
 @pytest.mark.parametrize(
     ("crew_method", "task_name"),
     [
@@ -121,8 +127,8 @@ def test_each_role_runs_in_an_isolated_one_task_crew(
 @pytest.mark.parametrize(
     ("agent_method", "max_iter", "max_tokens"),
     [
-        ("analyst", 4, 800),
-        ("arquitect", 12, 1200),
+        ("analyst", 4, 2000),
+        ("arquitect", 1, 4000),
         ("programer", 20, 2500),
         ("tester", 8, 600),
         ("reviewer", 8, 800),
@@ -173,23 +179,19 @@ def test_tasks_bind_structured_contract_outputs(monkeypatch):
     crew = KotyAppCrew()
 
     assert crew.analysis_task().output_pydantic is TicketContract
-    assert crew.architecture_task().output_pydantic is PlanManifest
+    assert crew.architecture_task().output_pydantic is PlanDraft
     assert crew.testing_task().output_pydantic is BrowserTesterResult
 
 
-def test_architecture_task_documents_flat_plan_manifest(monkeypatch):
+def test_architecture_task_documents_structured_plan_draft(monkeypatch):
     configure_models(monkeypatch)
     description = KotyAppCrew().architecture_task().description
 
-    assert '"proposal.md": "<sha256>"' in description
-    assert '"design.md": "<sha256>"' in description
-    assert '"tasks.md": "<sha256>"' in description
-    assert '"specs/<capability>/spec.md": "<sha256>"' in description
-    assert '"AC-001": ["T-001"]' in description
-    assert "profile debe ser exactamente el verification_profile declarado en design.md" in description
-    assert "No uses objetos anidados" in description
-    assert "proposal, design, tasks o spec" in description
-    assert "deben existir físicamente" in description
+    assert "{ticket_contract_json}" in description
+    assert "{project_context}" in description
+    assert "PlanDraft" in description
+    assert "No uses herramientas" in description
+    assert "## ADDED Requirements" in description
 
 
 def test_env_example_documents_all_role_token_defaults():
@@ -217,13 +219,8 @@ def test_role_tasks_accept_their_phase_contract_paths_and_authoritative_hashes(m
         "ticket_sha256",
     }
     assert set(re.findall(r"{([A-Za-z_][A-Za-z0-9_-]*)}", crew.architecture_task().description)) == {
-        "ticket_contract_path",
-        "plan_manifest_path",
-        "ticket_id",
-        "change_id",
-        "ticket_sha256",
-        "ticket_contract_sha256",
-        "base_gates",
+        "ticket_contract_json",
+        "project_context",
     }
     assert set(re.findall(r"{([A-Za-z_][A-Za-z0-9_-]*)}", crew.coding_task().description)) == {
         "plan_manifest_path",
