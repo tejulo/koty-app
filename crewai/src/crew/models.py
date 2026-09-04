@@ -39,6 +39,27 @@ class TicketContract(BaseModel):
     ambiguities: list[str]
 
 
+class PlanDraftSpec(BaseModel):
+    capability: str = Field(pattern=r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
+    content: str = Field(min_length=1)
+
+
+class PlanDraft(BaseModel):
+    profile: VerificationProfile
+    proposal: str = Field(min_length=1)
+    design: str = Field(min_length=1)
+    tasks: str = Field(min_length=1)
+    specs: list[PlanDraftSpec] = Field(min_length=1)
+    acceptance_map: dict[str, list[str]]
+
+    @model_validator(mode="after")
+    def require_unique_capabilities(self):
+        capabilities = [spec.capability for spec in self.specs]
+        if len(capabilities) != len(set(capabilities)):
+            raise ValueError("PlanDraft has duplicate spec capabilities")
+        return self
+
+
 class PlanManifest(BaseModel):
     schema_version: Literal[1] = 1
     ticket_id: str

@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Mapping, TypeVar
@@ -14,6 +15,7 @@ from .models import (
     GateEvidence,
     Phase,
     PlanManifest,
+    PlanDraft,
     RepairPack,
     ReviewPack,
     TaskCompletion,
@@ -28,6 +30,8 @@ BASE_GATES = ("python", "lint", "test", "build", "integration", "openspec")
 ModelT = TypeVar("ModelT", bound=BaseModel)
 CHANGE_ID = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
 TICKET_ID = re.compile(r"[A-Za-z][A-Za-z0-9]*-\d+")
+PROFILE_PATTERN = re.compile(r"^(?:-\s+)?verification_profile:\s*(\S+)\s*$", re.MULTILINE)
+VALID_PROFILES = {"standard", "browser", "operational", "browser_operational"}
 
 
 def _attempt_directory(change_id: str, attempt: int) -> Path:
@@ -72,6 +76,109 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def selected_profile(change_id: str) -> str:
+    _validate_change_id(change_id)
+    design = PROJECT_ROOT / "openspec" / "changes" / change_id / "design.md"
+    return profile_from_design(design.read_text(encoding="utf-8")) if design.is_file() else profile_from_design("")
+
+
+def profile_from_design(content: str) -> str:
+    profiles = PROFILE_PATTERN.findall(content)
+    if len(profiles) != 1 or profiles[0] not in VALID_PROFILES:
+        raise ValueError("OpenSpec design must have exactly one valid verification_profile")
+    return profiles[0]
+
+
+def write_plan_draft(change_id: str, attempt: int, draft: PlanDraft) -> dict[str, Path]:
+    _validate_change_id(change_id)
+    change = PROJECT_ROOT / "openspec" / "changes" / change_id
+    previous = _attempt_directory(change_id, attempt) / "previous-plan"
+    stage = _attempt_directory(change_id, attempt) / "plan-draft"
+    _recover_plan_promotion(change)
+    _snapshot_plan(change, previous)
+    artifacts = {
+        "proposal.md": draft.proposal,
+        "design.md": draft.design,
+        "tasks.md": draft.tasks,
+        **{
+            f"specs/{spec.capability}/spec.md": spec.content
+            for spec in draft.specs
+        },
+    }
+    shutil.rmtree(stage, ignore_errors=True)
+    try:
+        for name, content in artifacts.items():
+            _atomic_write(stage / name, content)
+        _atomic_write(_promotion_marker(change), str(attempt))
+        _clear_active_plan(change)
+        for name in artifacts:
+            target = change / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(stage / name, target)
+    except OSError:
+        restore_plan_draft(change_id, attempt)
+        raise
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+    paths = {name: change / name for name in artifacts}
+    return paths
+
+
+def restore_plan_draft(change_id: str, attempt: int) -> None:
+    _validate_change_id(change_id)
+    change = PROJECT_ROOT / "openspec" / "changes" / change_id
+    previous = _attempt_directory(change_id, attempt) / "previous-plan"
+    _clear_active_plan(change)
+    for name in ("proposal.md", "design.md", "tasks.md"):
+        source = previous / name
+        if source.is_file():
+            target = change / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    if (previous / "specs").is_dir():
+        shutil.copytree(previous / "specs", change / "specs")
+    _promotion_marker(change).unlink(missing_ok=True)
+
+
+def complete_plan_promotion(change_id: str) -> None:
+    _validate_change_id(change_id)
+    _promotion_marker(PROJECT_ROOT / "openspec" / "changes" / change_id).unlink(missing_ok=True)
+
+
+def _snapshot_plan(change: Path, previous: Path) -> None:
+    shutil.rmtree(previous, ignore_errors=True)
+    for name in ("proposal.md", "design.md", "tasks.md"):
+        source = change / name
+        if source.is_file():
+            target = previous / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    if (change / "specs").is_dir():
+        shutil.copytree(change / "specs", previous / "specs")
+
+
+def _clear_active_plan(change: Path) -> None:
+    for name in ("proposal.md", "design.md", "tasks.md"):
+        (change / name).unlink(missing_ok=True)
+    shutil.rmtree(change / "specs", ignore_errors=True)
+
+
+def _promotion_marker(change: Path) -> Path:
+    return change / ".plan-promotion"
+
+
+def _recover_plan_promotion(change: Path) -> None:
+    marker = _promotion_marker(change)
+    if not marker.is_file():
+        return
+    try:
+        attempt = int(marker.read_text(encoding="utf-8"))
+    except ValueError as error:
+        raise ValueError("Invalid pending plan promotion") from error
+    change_id = change.name
+    restore_plan_draft(change_id, attempt)
 
 
 def save_model(path: Path, model: BaseModel) -> None:

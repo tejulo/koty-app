@@ -33,8 +33,9 @@ strict OpenSpec validation for every profile.
 ### Requirement: Authoritative verification profiles and conditional Tester invocation
 
 The system SHALL accept only `standard`, `browser`, `operational`, and
-`browser_operational` verification profiles. Architect SHALL record exactly one
-selected profile in the active change design, and PlanManifest and
+`browser_operational` verification profiles. Architect SHALL return exactly one
+selected profile in its PlanDraft design content; the supervisor SHALL persist
+it to the active change design. PlanManifest and
 ExecutionState SHALL repeat that exact value. Before any base gate or Tester
 selection, the supervisor SHALL reject a missing profile, a profile outside the
 closed enum, a design/PlanManifest/ExecutionState mismatch, or a manifest that
@@ -106,16 +107,18 @@ and browser result.
 ### Requirement: Isolated role invocation without delegation
 
 The system SHALL invoke Analyst, Architect, Programmer, Tester, and Reviewer
-as separate one-task CrewAI executions with dynamic delegation disabled. A role
-SHALL receive only paths to the phase-specific contracts it requires and SHALL
-not receive another role's conversation output. The system SHALL not introduce
-a CrewAI manager or Flow.
+as separate one-task CrewAI executions with dynamic delegation disabled. Roles
+SHALL receive only paths to their phase-specific contracts, except Architect,
+which receives the serialized TicketContract and project context because it has
+no filesystem tools. No role SHALL receive another role's conversation output.
+The system SHALL not introduce a CrewAI manager or Flow.
 
-#### Scenario: Each role receives only its phase contract paths
+#### Scenario: Each role receives only its phase inputs
 - GIVEN a role invocation prepared by the supervisor
 - WHEN the CrewAI task is created
 - THEN the Crew contains exactly one task for that role
-- AND its inputs contain only the required contract, pack, evidence, or scenario paths
+- AND Architect receives only the serialized TicketContract and project context
+- AND every other role receives only the required contract, pack, evidence, or scenario paths
 - AND no prior role conversation output is supplied
 
 #### Scenario: Dynamic delegation remains disabled

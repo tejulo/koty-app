@@ -9,6 +9,8 @@ from crew.gates import GateRun
 from crew.models import (
     AcceptanceCriterion,
     ExecutionState,
+    PlanDraft,
+    PlanDraftSpec,
     PlanManifest,
     TesterResult as BrowserResult,
     TicketContract,
@@ -81,6 +83,22 @@ def persisted_inputs(tmp_path: Path, profile="standard"):
     return contract_path, plan_path, artifact_paths, manifest, completion_path
 
 
+def plan_draft() -> PlanDraft:
+    return PlanDraft(
+        profile="standard",
+        proposal="# Proposal\n",
+        design="verification_profile: standard\n",
+        tasks="# Tasks\n",
+        specs=[
+            PlanDraftSpec(
+                capability="identity-registration",
+                content="## ADDED Requirements\n\n### Requirement: Register identity\n\n#### Scenario: Valid email\n",
+            )
+        ],
+        acceptance_map={"AC-001": ["T-001"]},
+    )
+
+
 def passed_gates() -> list[GateRun]:
     return [
         GateRun(name, True, f"{name}-evidence", "")
@@ -118,6 +136,104 @@ def test_plan_manifest_rejects_missing_unmapped_and_mismatched_criteria():
             ["AC-001", "AC-002"],
             expected_profile="browser",
         )
+
+
+def test_write_plan_draft_replaces_stale_specs_and_retains_attempts(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    change = tmp_path / "openspec/changes/dev-40"
+    stale_spec = change / "specs/stale/spec.md"
+    stale_spec.parent.mkdir(parents=True)
+    stale_spec.write_text("stale", encoding="utf-8")
+    evidence = change / "attempts/1/ticket-contract.json"
+    evidence.parent.mkdir(parents=True)
+    evidence.write_text("evidence", encoding="utf-8")
+
+    paths = workflow.write_plan_draft("dev-40", 1, plan_draft())
+
+    assert set(paths) == {
+        "proposal.md",
+        "design.md",
+        "tasks.md",
+        "specs/identity-registration/spec.md",
+    }
+    assert paths["proposal.md"].read_text(encoding="utf-8") == "# Proposal\n"
+    assert paths["specs/identity-registration/spec.md"].is_file()
+    assert not stale_spec.exists()
+    assert evidence.read_text(encoding="utf-8") == "evidence"
+
+
+def test_write_plan_draft_snapshots_the_previous_active_plan(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    change = tmp_path / "openspec/changes/dev-40"
+    for name, content in {
+        "proposal.md": "old proposal",
+        "design.md": "old design",
+        "tasks.md": "old tasks",
+        "specs/old/spec.md": "old spec",
+    }.items():
+        path = change / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    workflow.write_plan_draft("dev-40", 2, plan_draft())
+
+    snapshot = change / "attempts/2/previous-plan"
+    assert (snapshot / "proposal.md").read_text(encoding="utf-8") == "old proposal"
+    assert (snapshot / "specs/old/spec.md").read_text(encoding="utf-8") == "old spec"
+
+
+def test_restore_plan_draft_restores_the_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    change = tmp_path / "openspec/changes/dev-40"
+    for name, content in {
+        "proposal.md": "old proposal",
+        "design.md": "verification_profile: standard\n",
+        "tasks.md": "old tasks",
+        "specs/old/spec.md": "old spec",
+    }.items():
+        path = change / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    workflow.write_plan_draft("dev-40", 2, plan_draft())
+    workflow.restore_plan_draft("dev-40", 2)
+
+    assert (change / "proposal.md").read_text(encoding="utf-8") == "old proposal"
+    assert (change / "specs/old/spec.md").read_text(encoding="utf-8") == "old spec"
+    assert not (change / "specs/identity-registration/spec.md").exists()
+
+
+def test_write_plan_draft_preserves_the_active_plan_when_staging_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    change = tmp_path / "openspec/changes/dev-40"
+    proposal = change / "proposal.md"
+    proposal.parent.mkdir(parents=True)
+    proposal.write_text("old proposal", encoding="utf-8")
+
+    def fail_staging(path, _content):
+        if "plan-draft" in path.parts:
+            raise OSError("disk full")
+
+    monkeypatch.setattr(workflow, "_atomic_write", fail_staging)
+
+    with pytest.raises(OSError, match="disk full"):
+        workflow.write_plan_draft("dev-40", 2, plan_draft())
+
+    assert proposal.read_text(encoding="utf-8") == "old proposal"
+
+
+def test_write_plan_draft_recovers_an_interrupted_promotion_before_replanning(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
+    change = tmp_path / "openspec/changes/dev-40"
+    proposal = change / "proposal.md"
+    proposal.parent.mkdir(parents=True)
+    proposal.write_text("old proposal", encoding="utf-8")
+
+    workflow.write_plan_draft("dev-40", 1, plan_draft())
+    workflow.write_plan_draft("dev-40", 2, plan_draft())
+
+    snapshot = change / "attempts/2/previous-plan/proposal.md"
+    assert snapshot.read_text(encoding="utf-8") == "old proposal"
 
 
 def test_plan_manifest_requires_a_ticket_contract_hash():

@@ -27,10 +27,12 @@
     design/manifest mismatch rejection, compact packs, and atomic saves.
 
 - [ ] **3. Isolate role invocations and bound outputs**
-  - Split CrewAI execution into one-task role crews with path-based inputs,
-    structured outputs, per-role limits, and disabled dynamic delegation.
+  - Split CrewAI execution into one-task role crews with structured outputs,
+    per-role limits, and disabled dynamic delegation. Architect receives the
+    serialized TicketContract and project context because it has no filesystem
+    tools; other roles receive path-based inputs.
   - Add coverage in `crewai/tests/test_crew.py` for role isolation, bounded
-    configuration, path-only task inputs, and disabled delegation.
+    configuration, role-specific task inputs, and disabled delegation.
 
 - [ ] **4. Implement the persistent phase machine**
   - Dispatch by persisted phase, run immutable base gates outside LLM context,

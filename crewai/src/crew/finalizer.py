@@ -10,8 +10,6 @@ from dotenv import load_dotenv
 
 CREWAI_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = CREWAI_ROOT.parent
-PROFILE_PATTERN = re.compile(r"^verification_profile:\s*(\S+)\s*$", re.MULTILINE)
-
 load_dotenv(CREWAI_ROOT / ".env")
 
 
@@ -239,11 +237,7 @@ def _state_path(reference: str) -> Path:
 
 
 def _selected_profile(change_id: str) -> str:
-    design = workflow.PROJECT_ROOT / "openspec" / "changes" / change_id / "design.md"
-    match = PROFILE_PATTERN.search(design.read_text(encoding="utf-8")) if design.is_file() else None
-    if not match or match.group(1) not in {"standard", "browser", "operational", "browser_operational"}:
-        raise ValueError("OpenSpec design has no valid verification_profile")
-    return match.group(1)
+    return workflow.selected_profile(change_id)
 
 
 def _check_review_pack(ticket_id: str, change_id: str) -> str:
