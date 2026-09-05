@@ -1623,6 +1623,44 @@ def test_resume_blocks_ticket_repairs_after_the_persisted_budget(tmp_path, monke
     assert workflow.load_execution("DEV-40").phase == "blocked"
 
 
+def test_ticket_repair_allows_a_fourth_programmer_dispatch(tmp_path, monkeypatch):
+    state = prepare_state(tmp_path, monkeypatch, phase="verifying")
+    failed = passed_gates()
+    failed[1] = GateRun("lint", False, "lint-evidence", "lint failure")
+    monkeypatch.setattr(main, "run_base_gates", lambda *_: failed)
+    state = main.run_verification("DEV-40", "dev-40", state)
+    state.phase_usage["repair_attempts"] = {"ticket": 3, "infrastructure": 0}
+    calls = []
+    monkeypatch.setattr(main, "kickoff_role", lambda role, **_: calls.append(role))
+
+    result = main.run_programmer("DEV-40", "dev-40", state)
+
+    assert result.phase == "verifying"
+    assert calls == ["programmer"]
+    assert result.phase_usage["repair_attempts"]["ticket"] == 4
+
+
+def test_ticket_repairs_require_human_evaluation_after_four_attempts(tmp_path, monkeypatch):
+    state = prepare_state(tmp_path, monkeypatch, phase="verifying")
+    failed = passed_gates()
+    failed[1] = GateRun("lint", False, "lint-evidence", "lint failure")
+    monkeypatch.setattr(main, "run_base_gates", lambda *_: failed)
+    state = main.run_verification("DEV-40", "dev-40", state)
+    state.phase_usage["repair_attempts"] = {"ticket": 4, "infrastructure": 0}
+    calls = []
+    monkeypatch.setattr(main, "kickoff_role", lambda role, **_: calls.append(role))
+
+    result = main.run_programmer("DEV-40", "dev-40", state)
+
+    assert result.phase == "blocked"
+    assert calls == []
+    assert result.phase_usage["human_evaluation_required"] == {
+        "budget": "ticket",
+        "maximum": 4,
+        "repair_pack_path": result.repair_pack_path,
+    }
+
+
 def test_resume_blocks_infrastructure_repairs_after_the_persisted_budget(tmp_path, monkeypatch):
     state = prepare_state(tmp_path, monkeypatch, phase="verifying")
     failed = passed_gates()
@@ -1726,6 +1764,23 @@ def test_tester_failure_transitions_to_blocked(tmp_path, monkeypatch):
 
     assert result.phase == "blocked"
     assert "provider down" in result.phase_usage["blocked_reason"]
+
+
+def test_browser_tester_receives_persisted_spec_paths(tmp_path, monkeypatch):
+    state = prepare_state(tmp_path, monkeypatch, phase="browser_testing", profile="browser")
+    received = {}
+
+    def kickoff(role, **kwargs):
+        assert role == "tester"
+        received.update(kwargs["inputs"])
+        return raw_output(TesterResult(status="passed", summary="passed"))
+
+    monkeypatch.setattr(main, "kickoff_role", kickoff)
+
+    result = main.run_browser_testing("DEV-40", "dev-40", state)
+
+    assert result.phase == "reviewing"
+    assert received["scenario_paths"] == "openspec/changes/dev-40/specs/crew-supervision/spec.md"
 
 
 def test_tester_invalid_contract_retry_does_not_block_the_next_browser_cycle(
