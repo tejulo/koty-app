@@ -275,6 +275,86 @@ def test_structured_contract_tasks_use_raw_outputs(monkeypatch):
         assert task.output_json is None
 
 
+@pytest.mark.parametrize(
+    ("task_name", "contract_fields"),
+    [
+        (
+            "analysis_task",
+            (
+                "`schema_version` (integer literal 1)",
+                "`ticket_id` (string)",
+                "`change_id` (string)",
+                "`ticket_sha256` (string)",
+                "`acceptance_criteria` (array of objects with `id` (string) and `text` (string))",
+                "`objective` (string)",
+                "`in_scope` (array of strings)",
+                "`constraints` (array of strings)",
+                "`dependencies` (array of strings)",
+                "`ambiguities` (array of strings)",
+            ),
+        ),
+        (
+            "architect_outline_task",
+            (
+                "`schema_version` (integer literal 1)",
+                "`profile` (string literal: standard, browser, operational, or browser_operational)",
+                "`units` (array of objects with `artifact` (string literal: proposal, design, tasks, or spec), optional `capability` (string or null), `objective` (string), and `context_refs` (array of strings))",
+                "`acceptance_map` (object mapping strings to arrays of strings)",
+            ),
+        ),
+        (
+            "architect_artifact_task",
+            (
+                "`schema_version` (integer literal 1)",
+                "`artifact` (string literal: proposal, design, tasks, or spec)",
+                "optional `capability` (string or null)",
+                "`content` (string)",
+            ),
+        ),
+        (
+            "testing_task",
+            (
+                "`status` (string literal: passed, failed, or skipped)",
+                "`summary` (string)",
+                "`scenarios` (array of strings)",
+            ),
+        ),
+        (
+            "review_task",
+            (
+                "`ticket_id` (string)",
+                "`change_id` (string)",
+                "`status` (string literal: approved, retryable_failure, or blocked)",
+                "`failure_type` (string literal: none, implementation, test, infrastructure, configuration, requirements, or max_attempts)",
+                "`failure_stage` (string or null)",
+                "`summary` (string)",
+            ),
+        ),
+    ],
+)
+def test_structured_task_prompts_name_exact_json_contracts(
+    monkeypatch, task_name, contract_fields
+):
+    configure_models(monkeypatch)
+    crew = KotyAppCrew()
+    tasks = {
+        "analysis_task": crew.analysis_task(),
+        "architect_outline_task": crew.architect_outline_crew().tasks[0],
+        "architect_artifact_task": crew.architect_artifact_crew().tasks[0],
+        "testing_task": crew.testing_task(),
+        "review_task": crew.review_task(),
+    }
+
+    description = re.sub(r"\s+", " ", tasks[task_name].description)
+
+    for field in contract_fields:
+        assert field in description
+    assert "Values must be valid JSON literals only" in description
+    assert "Do not use JavaScript or Python expressions such as `.replace(...)`" in description
+    assert "Do not invent localized key names" in description
+    assert "Do not add extra prose or Markdown" in description
+
+
 def test_architect_tasks_receive_only_their_staged_inputs(monkeypatch):
     configure_models(monkeypatch)
     crew = KotyAppCrew()

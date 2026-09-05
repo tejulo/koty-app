@@ -8,8 +8,16 @@ analysis_task:
     Produce exclusivamente un TicketContract fiel al ticket, con objetivo,
     alcance, criterios de aceptación con IDs AC-*, restricciones,
     dependencias y ambigüedades. No inventes información.
+    Contrato JSON exacto TicketContract, con estas claves y tipos:
+    `schema_version` (integer literal 1), `ticket_id` (string), `change_id`
+    (string), `ticket_sha256` (string), `acceptance_criteria` (array of
+    objects with `id` (string) and `text` (string)), `objective` (string),
+    `in_scope` (array of strings), `constraints` (array of strings),
+    `dependencies` (array of strings) y `ambiguities` (array of strings).
     Responde con exactamente un objeto JSON que coincida con TicketContract,
-    sin prosa ni bloques Markdown.
+    sin prosa ni bloques Markdown. Values must be valid JSON literals only.
+    Do not use JavaScript or Python expressions such as `.replace(...)`. Do
+    not invent localized key names. Do not add extra prose or Markdown.
   expected_output: >
     Un TicketContract válido.
   agent: analyst
@@ -26,11 +34,19 @@ architect_outline_task:
 
     Devuelve exclusivamente un PlanOutline con profile, acceptance_map y una
     PlanUnitOutline para proposal, design, tasks y cada spec requerida. Cada
-    unidad selecciona solo referencias conocidas del índice. No uses
-    herramientas, no escribas archivos y no calcules hashes: el supervisor
+    unidad selecciona solo referencias conocidas del índice. No uses herramientas,
+    no escribas archivos y no calcules hashes: el supervisor
     persiste y valida el resultado.
+    Contrato JSON exacto PlanOutline, con estas claves y tipos:
+    `schema_version` (integer literal 1), `profile` (string literal: standard,
+    browser, operational, or browser_operational), `units` (array of objects
+    with `artifact` (string literal: proposal, design, tasks, or spec), optional `capability` (string or
+    null), `objective` (string), and `context_refs` (array of strings)), y
+    `acceptance_map` (object mapping strings to arrays of strings).
     Responde con exactamente un objeto JSON que coincida con PlanOutline,
-    sin prosa ni bloques Markdown.
+    sin prosa ni bloques Markdown. Values must be valid JSON literals only.
+    Do not use JavaScript or Python expressions such as `.replace(...)`. Do
+    not invent localized key names. Do not add extra prose or Markdown.
   expected_output: >
     Un PlanOutline válido.
 
@@ -56,11 +72,17 @@ architect_artifact_task:
     Browser E2E: required o Browser E2E: not_required. Si es spec, debe usar los
     encabezados OpenSpec exactos ## ADDED Requirements, ## MODIFIED Requirements,
     ## REMOVED Requirements o ## RENAMED Requirements, y cada requisito debe
-    contener al menos un escenario encabezado #### Scenario:. No uses
-    herramientas, no escribas archivos y no calcules hashes: el supervisor
+    contener al menos un escenario encabezado #### Scenario:. No uses herramientas,
+    no escribas archivos y no calcules hashes: el supervisor
     persiste y valida el resultado.
+    Contrato JSON exacto PlanArtifactUnit, con estas claves y tipos:
+    `schema_version` (integer literal 1), `artifact` (string literal: proposal,
+    design, tasks, or spec), optional
+    `capability` (string or null), y `content` (string).
     Responde con exactamente un objeto JSON que coincida con PlanArtifactUnit,
-    sin prosa ni bloques Markdown.
+    sin prosa ni bloques Markdown. Values must be valid JSON literals only.
+    Do not use JavaScript or Python expressions such as `.replace(...)`. Do
+    not invent localized key names. Do not add extra prose or Markdown.
   expected_output: >
     Un PlanArtifactUnit válido.
 
@@ -84,8 +106,13 @@ testing_task:
     y los escenarios persistidos en '{scenario_paths}'. Ejecuta solo los
     escenarios indicados cuando el perfil requiera Browser E2E; de otro modo
     devuelve status=skipped. No modifiques código ni inventes resultados.
+    Contrato JSON exacto TesterResult, con estas claves y tipos: `status`
+    (string literal: passed, failed, or skipped), `summary` (string), y
+    `scenarios` (array of strings).
     Responde con exactamente un objeto JSON que coincida con TesterResult,
-    sin prosa ni bloques Markdown.
+    sin prosa ni bloques Markdown. Values must be valid JSON literals only.
+    Do not use JavaScript or Python expressions such as `.replace(...)`. Do
+    not invent localized key names. Do not add extra prose or Markdown.
   expected_output: >
     Resultado estructurado con status, summary y scenarios.
   agent: tester
@@ -97,8 +124,16 @@ review_task:
     los archivos y la evidencia que referencia. Devuelve approved solo si el
     pack sustenta cada criterio de aceptación; usa retryable_failure cuando
     Programmer puede corregirlo o blocked si requiere intervención humana.
+    Contrato JSON exacto ReviewVerdict, con estas claves y tipos: `ticket_id`
+    (string), `change_id` (string), `status` (string literal: approved,
+    retryable_failure, or blocked), `failure_type` (string literal: none,
+    implementation, test, infrastructure, configuration, requirements, or
+    max_attempts),
+    `failure_stage` (string or null), y `summary` (string).
     Responde con exactamente un objeto JSON que coincida con ReviewVerdict,
-    sin prosa ni bloques Markdown.
+    sin prosa ni bloques Markdown. Values must be valid JSON literals only.
+    Do not use JavaScript or Python expressions such as `.replace(...)`. Do
+    not invent localized key names. Do not add extra prose or Markdown.
   expected_output: >
     Resultado estructurado con ticket_id, change_id, status,
     failure_type, failure_stage y summary.
