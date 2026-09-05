@@ -6,7 +6,8 @@ analysis_task:
     ticket_id='{ticket_id}', change_id='{change_id}' y ese ticket_sha256.
 
     Produce exclusivamente un TicketContract fiel al ticket, con objetivo,
-    alcance, criterios de aceptación con IDs AC-*, restricciones,
+    alcance, criterios de aceptación con IDs exactamente con el patrón
+    `AC-[0-9]{3}` (por ejemplo, `AC-001`), restricciones,
     dependencias y ambigüedades. No inventes información.
     Contrato JSON exacto TicketContract, con estas claves y tipos:
     `schema_version` (integer literal 1), `ticket_id` (string), `change_id`
