@@ -355,6 +355,15 @@ def test_structured_task_prompts_name_exact_json_contracts(
     assert "Do not add extra prose or Markdown" in description
 
 
+def test_analysis_prompt_requires_three_digit_acceptance_criterion_ids(monkeypatch):
+    configure_models(monkeypatch)
+
+    description = re.sub(r"\s+", " ", KotyAppCrew().analysis_task().description)
+
+    assert "`AC-[0-9]{3}`" in description
+    assert "`AC-001`" in description
+
+
 def test_architect_tasks_receive_only_their_staged_inputs(monkeypatch):
     configure_models(monkeypatch)
     crew = KotyAppCrew()
