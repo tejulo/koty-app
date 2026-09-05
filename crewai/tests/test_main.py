@@ -234,6 +234,18 @@ def test_as_model_parses_raw_json_in_a_json_code_fence():
     )
 
 
+def test_as_model_parses_raw_json_after_a_think_block():
+    output = SimpleNamespace(
+        raw='<think>Reasoning belongs outside the contract.</think>\n{"artifact":"proposal","objective":"After thinking.","context_refs":[]}'
+    )
+
+    result = main._as_model(output, PlanUnitOutline)
+
+    assert result == PlanUnitOutline(
+        artifact="proposal", objective="After thinking.", context_refs=[]
+    )
+
+
 def test_as_model_rejects_malformed_raw_json():
     output = SimpleNamespace(raw='{"artifact":"proposal"')
 
