@@ -435,6 +435,13 @@ def test_env_example_documents_staged_architect_defaults():
     assert "ZEN_ARCHITECT_MAX_TOKENS=" not in env_example.read_text(encoding="utf-8")
 
 
+def test_repair_budget_examples_default_to_four_ticket_attempts():
+    crew_root = Path(__file__).parents[1]
+
+    assert "MAX_TICKET_ATTEMPTS=4" in (crew_root / ".env.example").read_text(encoding="utf-8")
+    assert "MAX_TICKET_ATTEMPTS=4" in (crew_root / "README.md").read_text(encoding="utf-8")
+
+
 def test_role_tasks_accept_their_phase_contract_paths_and_authoritative_hashes(monkeypatch):
     configure_models(monkeypatch)
     crew = KotyAppCrew()
