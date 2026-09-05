@@ -113,7 +113,7 @@ class PlanUnitOutline(StrictPlanningModel):
         pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
     )
     objective: str = Field(min_length=1, pattern=r"\S")
-    context_refs: list[str]
+    context_refs: list[str] = Field(max_length=12)
 
     @model_validator(mode="after")
     def require_artifact_capability(self):
