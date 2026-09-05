@@ -19,6 +19,56 @@ RepairPack, and ReviewPack with hashes before a later phase consumes them.
 - THEN only Programmer is eligible for the next LLM invocation
 - AND Analyst and Architect are not invoked again
 
+### Requirement: Portable raw JSON contract transport
+
+Analyst, Architect, Tester, and Reviewer invocations SHALL return exactly one
+contract as raw JSON text. Programmer SHALL remain intentionally unstructured.
+The supervisor SHALL retain the exact raw response as attempt evidence and
+locally parse it with the expected Pydantic model. Local Pydantic validation
+SHALL be authoritative; the system SHALL NOT rely on provider or CrewAI
+structured-output decoding, schema enforcement, or constructed model output as
+evidence that a contract is valid.
+
+After successful local Pydantic parsing, the existing semantic,
+cross-contract, hash, and stage-boundary validation SHALL remain required and
+unchanged. Malformed JSON, a non-object response, or a schema mismatch SHALL be
+an invalid output.
+
+For an invalid output, the supervisor SHALL atomically persist the raw response,
+validation failure, role, expected contract model, invocation identifier, and
+retry state. It SHALL persist the retry as `pending`, mark it `consumed` before
+external dispatch, and retry only that structured invocation once. It SHALL
+retain and locally validate the retry response identically. A second invalid
+output, or a restart that observes a consumed retry without a persisted validated
+result, SHALL block the current phase without advancing its stage boundary.
+
+This invalid-output retry SHALL be independent of the existing Architect
+empty-response and `LengthFinishReasonError` retry guarantees and SHALL NOT
+relax, consume, or replace either guarantee.
+
+#### Scenario: Local validation accepts a portable contract
+- GIVEN a structured role returns a raw JSON object for its expected contract
+- WHEN the supervisor receives the response
+- THEN it retains the exact raw response as attempt evidence
+- AND it validates the response locally with the expected Pydantic model before semantic processing
+- AND existing semantic, cross-contract, hash, and stage-boundary validation proceeds unchanged
+
+#### Scenario: Invalid output retries once with auditable evidence
+- GIVEN a structured role returns malformed JSON or a JSON object that fails its expected Pydantic model
+- WHEN the supervisor handles the response
+- THEN it atomically persists the raw response, validation failure, invocation identifier, and `pending` retry state
+- AND it marks that retry `consumed` before dispatching the same invocation once
+- AND it retains the retry response and validation result as separate attempt evidence
+- AND a second invalid response blocks the current phase without advancing its stage boundary
+
+#### Scenario: Consumed invalid-output retry is not redispatched after restart
+- GIVEN an invalid-output retry is durably `consumed`
+- AND no locally validated result for that retry was persisted before the process stopped
+- WHEN the supervisor restarts
+- THEN it blocks the current phase
+- AND it does not dispatch the invalid-output retry again
+- AND the raw response, retry state, and existing phase evidence remain auditable
+
 ### Requirement: Staged Architect artifact generation
 
 After TicketContract validation, the system SHALL invoke Architect once for a
@@ -231,7 +281,10 @@ and browser result.
 ### Requirement: Isolated role invocation without delegation
 
 The system SHALL invoke Analyst, Architect, Programmer, Tester, and Reviewer
-as separate one-task CrewAI executions with dynamic delegation disabled. Roles
+as separate one-task CrewAI executions with dynamic delegation disabled.
+Analyst, Architect, Tester, and Reviewer SHALL return raw JSON text that the
+supervisor validates locally under the Portable raw JSON contract transport
+requirement; Programmer SHALL remain intentionally unstructured. Roles
 SHALL receive only paths to their phase-specific contracts, except the Architect
 outline invocation, which receives exactly the serialized TicketContract and
 body-free context index, and each Architect artifact invocation, which receives
@@ -245,6 +298,8 @@ Flow.
 - WHEN the CrewAI task is created
 - THEN the Crew contains exactly one task for that role
 - AND the Architect outline and artifact invocations receive only their exact staged inputs
+- AND Analyst, Architect, Tester, and Reviewer responses are raw JSON text validated locally by the supervisor
+- AND Programmer remains intentionally unstructured
 - AND every other role receives only the required contract, pack, evidence, or scenario paths
 - AND no prior role conversation output is supplied
 

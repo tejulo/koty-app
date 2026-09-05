@@ -18,13 +18,6 @@ from crewai.tools.tool_failure import (
     ToolFailurePolicy,
 )
 
-from .models import (
-    PlanArtifactUnit,
-    PlanOutline,
-    ReviewVerdict,
-    TesterResult,
-    TicketContract,
-)
 from .tools.custom_tool import (
     buscar_tarea_linear,
     ejecutar_playwright,
@@ -104,6 +97,7 @@ class KotyAppCrew:
                 "ZEN_ANALYST_MODEL",
                 "ZEN_ANALYST_MAX_TOKENS",
                 2000,
+                max_retries=0,
             ),
             tools=[
                 buscar_tarea_linear,
@@ -112,6 +106,7 @@ class KotyAppCrew:
             allow_delegation=False,
             respect_context_window=True,
             max_iter=4,
+            max_retry_limit=0,
             tool_failure_policy=(
                 ToolFailurePolicy.RAISE
             ),
@@ -163,6 +158,7 @@ class KotyAppCrew:
                 "ZEN_TESTER_MODEL",
                 "ZEN_TESTER_MAX_TOKENS",
                 600,
+                max_retries=0,
             ),
             tools=[
                 leer_archivo_raiz,
@@ -174,6 +170,7 @@ class KotyAppCrew:
             allow_delegation=False,
             respect_context_window=True,
             max_iter=8,
+            max_retry_limit=0,
         )
 
     @agent
@@ -184,6 +181,7 @@ class KotyAppCrew:
                 "ZEN_REVIEWER_MODEL",
                 "ZEN_REVIEWER_MAX_TOKENS",
                 800,
+                max_retries=0,
             ),
             tools=[
                 leer_archivo_raiz,
@@ -193,6 +191,7 @@ class KotyAppCrew:
             allow_delegation=False,
             respect_context_window=True,
             max_iter=8,
+            max_retry_limit=0,
         )
 
     @task
@@ -201,7 +200,6 @@ class KotyAppCrew:
             config=self.tasks_config[
                 "analysis_task"
             ],
-            output_pydantic=TicketContract,
         )
 
     def architect_outline_task(self) -> Task:
@@ -210,7 +208,6 @@ class KotyAppCrew:
             name="architect_outline_task",
             config=self.tasks_config["architect_outline_task"],
             agent=agent,
-            output_pydantic=PlanOutline,
         )
 
     def architect_artifact_task(self, *, retry: bool = False) -> Task:
@@ -225,7 +222,6 @@ class KotyAppCrew:
             name="architect_artifact_task",
             config=self.tasks_config["architect_artifact_task"],
             agent=agent,
-            output_pydantic=PlanArtifactUnit,
         )
 
     @task
@@ -242,7 +238,6 @@ class KotyAppCrew:
             config=self.tasks_config[
                 "testing_task"
             ],
-            output_pydantic=TesterResult,
         )
 
     @task
@@ -251,7 +246,6 @@ class KotyAppCrew:
             config=self.tasks_config[
                 "review_task"
             ],
-            output_pydantic=ReviewVerdict,
         )
 
     @crew

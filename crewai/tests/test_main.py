@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 import crew.main as main
 import crew.finalizer as finalizer
@@ -83,6 +84,10 @@ def artifact(unit: PlanUnitOutline) -> PlanArtifactUnit:
     )
 
 
+def raw_output(model, **attributes):
+    return SimpleNamespace(raw=model.model_dump_json(), **attributes)
+
+
 def prepare_planning_root(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setattr(workflow, "PROJECT_ROOT", tmp_path)
     context = tmp_path / "CONTEXT.md"
@@ -111,14 +116,14 @@ def install_staged_architect(monkeypatch, artifact_call):
     monkeypatch.setattr(
         main,
         "kickoff_role",
-        lambda role, **_: SimpleNamespace(pydantic=contract())
+        lambda role, **_: raw_output(contract())
         if role == "analyst"
         else (_ for _ in ()).throw(AssertionError(f"legacy role dispatch: {role}")),
     )
     monkeypatch.setattr(
         main,
         "kickoff_architect_outline",
-        lambda *, inputs: SimpleNamespace(pydantic=outline(), token_usage={"total_tokens": 11}),
+        lambda *, inputs: raw_output(outline(), token_usage={"total_tokens": 11}),
         raising=False,
     )
     monkeypatch.setattr(
@@ -202,6 +207,319 @@ def passed_gates():
     return [GateRun(name, True, f"{name}-evidence", "") for name in workflow.BASE_GATES]
 
 
+def test_as_model_parses_plain_raw_json_before_pydantic_output():
+    output = SimpleNamespace(
+        raw='{"artifact":"proposal","objective":"Raw output.","context_refs":[]}',
+        pydantic=PlanUnitOutline(
+            artifact="tasks", objective="Structured output.", context_refs=[]
+        ),
+    )
+
+    result = main._as_model(output, PlanUnitOutline)
+
+    assert result == PlanUnitOutline(
+        artifact="proposal", objective="Raw output.", context_refs=[]
+    )
+
+
+def test_as_model_parses_raw_json_in_a_json_code_fence():
+    output = SimpleNamespace(
+        raw="\n```json\n{\"artifact\":\"proposal\",\"objective\":\"Fenced output.\",\"context_refs\":[]}\n```\n"
+    )
+
+    result = main._as_model(output, PlanUnitOutline)
+
+    assert result == PlanUnitOutline(
+        artifact="proposal", objective="Fenced output.", context_refs=[]
+    )
+
+
+def test_as_model_rejects_malformed_raw_json():
+    output = SimpleNamespace(raw='{"artifact":"proposal"')
+
+    with pytest.raises(ValidationError, match="Invalid JSON"):
+        main._as_model(output, PlanUnitOutline)
+
+
+def test_as_model_rejects_raw_json_that_fails_model_validation():
+    output = SimpleNamespace(raw='{"artifact":"proposal","objective":"Invalid output.","context_refs":"not a list"}')
+
+    with pytest.raises(ValidationError, match="context_refs"):
+        main._as_model(output, PlanUnitOutline)
+
+
+def test_as_model_rejects_an_empty_raw_contract_before_pydantic_fallback():
+    output = SimpleNamespace(
+        raw=None,
+        pydantic=PlanUnitOutline(
+            artifact="proposal", objective="Legacy fallback must not bypass raw.", context_refs=[]
+        ),
+    )
+
+    with pytest.raises(ValueError, match="raw JSON"):
+        main._as_model(output, PlanUnitOutline)
+
+
+def test_as_model_rejects_constructed_pydantic_output_without_raw_json():
+    output = SimpleNamespace(
+        pydantic=PlanUnitOutline(
+            artifact="proposal", objective="Constructed output.", context_refs=[]
+        )
+    )
+
+    with pytest.raises(ValueError, match="raw JSON"):
+        main._as_model(output, PlanUnitOutline)
+
+
+def test_invalid_analyst_raw_contract_retries_once_and_records_each_invocation(
+    tmp_path, monkeypatch
+):
+    prepare_planning_root(tmp_path, monkeypatch)
+    analyst_calls = []
+
+    def analyst(role, **_):
+        assert role == "analyst"
+        analyst_calls.append(role)
+        raw = "{invalid" if len(analyst_calls) == 1 else contract().model_dump_json()
+        return SimpleNamespace(raw=raw, token_usage={"total_tokens": len(analyst_calls)})
+
+    monkeypatch.setattr(main, "kickoff_role", analyst)
+    monkeypatch.setattr(
+        main,
+        "kickoff_architect_outline",
+        lambda **_: SimpleNamespace(raw=outline().model_dump_json()),
+    )
+    monkeypatch.setattr(
+        main,
+        "kickoff_architect_artifact",
+        lambda *, inputs, retry=False: SimpleNamespace(
+            raw=artifact(
+                PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
+            ).model_dump_json()
+        ),
+    )
+
+    result = main.run_planning(
+        "DEV-40", "dev-40", ExecutionState(ticket_id="DEV-40", change_id="dev-40")
+    )
+
+    assert result.phase == "implementing"
+    assert analyst_calls == ["analyst", "analyst"]
+    usage_paths = sorted(
+        workflow.ticket_contract_path("dev-40", 1).parent.glob(
+            "phase-usage-planning-analyst-*.json"
+        )
+    )
+    assert len(usage_paths) == 2
+    failed = json.loads(usage_paths[0].read_text(encoding="utf-8"))
+    completed = json.loads(usage_paths[1].read_text(encoding="utf-8"))
+    assert failed["status"] == "failed"
+    assert failed["raw"] == "{invalid"
+    assert failed["usage"] == {"total_tokens": 1}
+    assert failed["expected_model"] == "TicketContract"
+    assert failed["validation_error"]
+    assert failed["retry_state"] == "pending"
+    assert completed["status"] == "completed"
+    assert completed["usage"] == {"total_tokens": 2}
+    assert completed["retry_state"] == "consumed"
+    assert result.contract_output_retry_state == {}
+
+
+def test_two_invalid_analyst_contracts_exhaust_the_single_retry(tmp_path, monkeypatch):
+    prepare_planning_root(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        main,
+        "kickoff_role",
+        lambda role, **_: calls.append(role) or SimpleNamespace(raw="{invalid"),
+    )
+
+    result = main.run_planning(
+        "DEV-40", "dev-40", ExecutionState(ticket_id="DEV-40", change_id="dev-40")
+    )
+
+    assert result.phase == "blocked"
+    assert calls == ["analyst", "analyst"]
+    assert result.contract_output_retry_state == {"analyst": "consumed"}
+    usage_paths = sorted(
+        workflow.ticket_contract_path("dev-40", 1).parent.glob(
+            "phase-usage-planning-analyst-*.json"
+        )
+    )
+    assert len(usage_paths) == 2
+    assert [json.loads(path.read_text())["status"] for path in usage_paths] == [
+        "failed",
+        "failed",
+    ]
+
+
+def test_invalid_contract_persists_pending_retry_before_failed_usage_recording(
+    tmp_path, monkeypatch
+):
+    prepare_planning_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        main,
+        "kickoff_role",
+        lambda *_args, **_kwargs: SimpleNamespace(raw="{invalid"),
+    )
+
+    def crash_while_recording(*_args, **_kwargs):
+        raise SystemExit("crashed while writing failed usage")
+
+    monkeypatch.setattr(main, "_record_usage", crash_while_recording)
+    with pytest.raises(SystemExit, match="failed usage"):
+        main.run_planning(
+            "DEV-40",
+            "dev-40",
+            ExecutionState(ticket_id="DEV-40", change_id="dev-40"),
+        )
+
+    persisted = workflow.load_execution("DEV-40")
+    assert persisted.contract_output_retry_state == {"analyst": "pending"}
+    audit = persisted.phase_usage["contract_output_retry:analyst"]
+    assert audit["raw"] == "{invalid"
+    assert audit["expected_model"] == "TicketContract"
+    assert "Invalid JSON" in audit["validation_error"]
+    assert audit["invocation"] == 1
+    assert audit["retry_state"] == "pending"
+
+
+def test_resume_reconstructs_pending_contract_failure_before_distinct_retry(
+    tmp_path, monkeypatch
+):
+    prepare_planning_root(tmp_path, monkeypatch)
+    analyst_calls = []
+
+    def analyst(role, **_):
+        analyst_calls.append(role)
+        raw = "{invalid" if len(analyst_calls) == 1 else contract().model_dump_json()
+        return SimpleNamespace(raw=raw)
+
+    monkeypatch.setattr(main, "kickoff_role", analyst)
+    original_record_usage = main._record_usage
+
+    def crash_before_failed_usage(*_args, **_kwargs):
+        raise SystemExit("crashed before failed usage")
+
+    monkeypatch.setattr(main, "_record_usage", crash_before_failed_usage)
+    with pytest.raises(SystemExit, match="failed usage"):
+        main.run_planning(
+            "DEV-40",
+            "dev-40",
+            ExecutionState(ticket_id="DEV-40", change_id="dev-40"),
+        )
+
+    resumed = workflow.load_execution("DEV-40")
+    monkeypatch.setattr(main, "_record_usage", original_record_usage)
+    monkeypatch.setattr(
+        main,
+        "kickoff_architect_outline",
+        lambda **_: raw_output(outline()),
+    )
+    monkeypatch.setattr(
+        main,
+        "kickoff_architect_artifact",
+        lambda *, inputs, retry=False: raw_output(
+            artifact(PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"]))
+        ),
+    )
+
+    result = main.run_planning("DEV-40", "dev-40", resumed)
+
+    assert result.phase == "implementing"
+    assert analyst_calls == ["analyst", "analyst"]
+    usage_paths = sorted(
+        workflow.ticket_contract_path("dev-40", 1).parent.glob(
+            "phase-usage-planning-analyst-*.json"
+        )
+    )
+    assert len(usage_paths) == 2
+    evidence = [json.loads(path.read_text(encoding="utf-8")) for path in usage_paths]
+    assert [(item["status"], item["invocation"]) for item in evidence] == [
+        ("failed", 1),
+        ("completed", 2),
+    ]
+    assert evidence[0]["raw"] == "{invalid"
+    assert evidence[0]["validation_error"]
+
+
+def test_semantic_contract_failure_blocks_without_a_second_dispatch(tmp_path, monkeypatch):
+    prepare_planning_root(tmp_path, monkeypatch)
+    calls = []
+    invalid = contract().model_copy(update={"ticket_id": "DEV-41"})
+    monkeypatch.setattr(
+        main,
+        "kickoff_role",
+        lambda role, **_: calls.append(role) or raw_output(invalid),
+    )
+
+    result = main.run_planning(
+        "DEV-40", "dev-40", ExecutionState(ticket_id="DEV-40", change_id="dev-40")
+    )
+
+    assert result.phase == "blocked"
+    assert calls == ["analyst"]
+    assert result.contract_output_retry_state == {}
+
+
+def test_dispatch_value_error_blocks_without_consuming_a_contract_retry(
+    tmp_path, monkeypatch
+):
+    prepare_planning_root(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        main,
+        "kickoff_role",
+        lambda role, **_: calls.append(role) or (_ for _ in ()).throw(ValueError("Falta configuración")),
+    )
+
+    result = main.run_planning(
+        "DEV-40", "dev-40", ExecutionState(ticket_id="DEV-40", change_id="dev-40")
+    )
+
+    assert result.phase == "blocked"
+    assert calls == ["analyst"]
+    assert result.contract_output_retry_state == {}
+
+
+def test_restart_blocks_consumed_analyst_contract_retry_before_redispatch(
+    tmp_path, monkeypatch
+):
+    prepare_planning_root(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        main,
+        "kickoff_role",
+        lambda role, **_: calls.append(role) or SimpleNamespace(raw="{invalid"),
+    )
+    original_save = workflow.save_execution
+
+    def stop_after_consumption(ticket_id, state):
+        original_save(ticket_id, state)
+        if state.contract_output_retry_state.get("analyst") == "consumed":
+            raise SystemExit("stopped after analyst retry consumption")
+
+    monkeypatch.setattr(workflow, "save_execution", stop_after_consumption)
+    with pytest.raises(SystemExit, match="analyst retry consumption"):
+        main.run_planning(
+            "DEV-40",
+            "dev-40",
+            ExecutionState(ticket_id="DEV-40", change_id="dev-40"),
+        )
+
+    resumed = workflow.load_execution("DEV-40")
+    assert resumed.contract_output_retry_state == {"analyst": "consumed"}
+    assert calls == ["analyst"]
+    monkeypatch.setattr(workflow, "save_execution", original_save)
+    monkeypatch.setattr(main, "kickoff_role", lambda role, **_: calls.append(role))
+
+    result = main.run_planning("DEV-40", "dev-40", resumed)
+
+    assert result.phase == "blocked"
+    assert calls == ["analyst"]
+    assert "contract output retry" in result.phase_usage["blocked_reason"].lower()
+
+
 def test_current_ticket_hash_is_computed_from_serialized_ticket(monkeypatch):
     ticket = {"id": "DEV-40", "title": "Persist phase contracts"}
     monkeypatch.setattr(main, "get_issue", lambda _: ticket)
@@ -225,8 +543,8 @@ def test_repair_runs_only_programmer_and_reviewer_when_plan_is_current(tmp_path,
     def kickoff(role, **_):
         calls.append(role)
         if role == "reviewer":
-            return SimpleNamespace(
-                pydantic=ReviewVerdict(
+            return raw_output(
+                ReviewVerdict(
                     ticket_id="DEV-40", change_id="dev-40", status="approved", summary="Approved."
                 )
             )
@@ -310,11 +628,11 @@ def test_staged_planning_uses_exact_inputs_and_outline_order_before_promotion(
 
     def analyst(role, *, inputs):
         calls.append((role, inputs))
-        return SimpleNamespace(pydantic=contract(), token_usage={"total_tokens": 7})
+        return raw_output(contract(), token_usage={"total_tokens": 7})
 
     def outline_call(*, inputs):
         calls.append(("outline", inputs))
-        return SimpleNamespace(pydantic=outline(), token_usage={"total_tokens": 11})
+        return raw_output(outline(), token_usage={"total_tokens": 11})
 
     def artifact_call(*, inputs, retry=False):
         requested = PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
@@ -330,7 +648,7 @@ def test_staged_planning_uses_exact_inputs_and_outline_order_before_promotion(
         assert inputs["ticket_contract_json"] == contract().model_dump_json()
         assert inputs["plan_outline_json"] == outline().model_dump_json()
         assert inputs["plan_unit_outline_json"] == requested.model_dump_json()
-        return SimpleNamespace(pydantic=artifact(requested), token_usage={"total_tokens": 13})
+        return raw_output(artifact(requested), token_usage={"total_tokens": 13})
 
     monkeypatch.setattr(main, "kickoff_role", analyst)
     monkeypatch.setattr(main, "kickoff_architect_outline", outline_call, raising=False)
@@ -419,7 +737,7 @@ def test_artifact_length_failure_records_usage_and_retries_only_that_unit(
             if wrapped:
                 raise RuntimeError("wrapped") from length_error
             raise length_error
-        return SimpleNamespace(pydantic=artifact(requested), token_usage={"total_tokens": 5})
+        return raw_output(artifact(requested), token_usage={"total_tokens": 5})
 
     install_staged_architect(monkeypatch, artifact_call)
 
@@ -589,7 +907,7 @@ def test_restart_after_normal_length_failure_resumes_with_retry_budget(
     def resumed_artifact(*, inputs, retry=False):
         requested = PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
         resumed_calls.append((requested.unit_key, retry))
-        return SimpleNamespace(pydantic=artifact(requested))
+        return raw_output(artifact(requested))
 
     monkeypatch.setattr(main, "kickoff_architect_artifact", resumed_artifact)
 
@@ -613,7 +931,7 @@ def test_restart_after_length_retry_is_consumed_blocks_without_another_call(
     def first_artifact(*, inputs, retry=False):
         requested = PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
         if requested.unit_key == "proposal":
-            return SimpleNamespace(pydantic=artifact(requested))
+            return raw_output(artifact(requested))
         raise main.LengthFinishReasonError(
             completion=SimpleNamespace(usage={"total_tokens": 8000})
         )
@@ -685,7 +1003,7 @@ def test_outline_length_failure_is_not_retried(tmp_path, monkeypatch):
     monkeypatch.setattr(
         main,
         "kickoff_role",
-        lambda role, **_: SimpleNamespace(pydantic=contract()),
+        lambda role, **_: raw_output(contract()),
     )
 
     def outline_call(*, inputs):
@@ -721,7 +1039,7 @@ def test_restart_reuses_outline_and_completed_units_in_the_same_attempt(
         first_calls.append(requested.unit_key)
         if requested.unit_key == "design":
             raise SystemExit("interrupted")
-        return SimpleNamespace(pydantic=artifact(requested), token_usage={"total_tokens": 5})
+        return raw_output(artifact(requested), token_usage={"total_tokens": 5})
 
     install_staged_architect(monkeypatch, interrupted_artifact)
     initial = ExecutionState(ticket_id="DEV-40", change_id="dev-40")
@@ -752,7 +1070,7 @@ def test_restart_reuses_outline_and_completed_units_in_the_same_attempt(
     def resumed_artifact(*, inputs, retry=False):
         requested = PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
         resumed_calls.append(requested.unit_key)
-        return SimpleNamespace(pydantic=artifact(requested), token_usage={"total_tokens": 5})
+        return raw_output(artifact(requested), token_usage={"total_tokens": 5})
 
     monkeypatch.setattr(main, "kickoff_architect_artifact", resumed_artifact, raising=False)
 
@@ -769,8 +1087,8 @@ def test_resume_blocks_when_checkpoint_file_is_replaced_by_stale_earlier_version
     prepare_planning_root(tmp_path, monkeypatch)
     install_staged_architect(
         monkeypatch,
-        lambda *, inputs, retry=False: SimpleNamespace(
-            pydantic=artifact(
+        lambda *, inputs, retry=False: raw_output(
+            artifact(
                 PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
             )
         ),
@@ -822,7 +1140,7 @@ def test_resume_blocks_instead_of_adopting_orphan_checkpoint_file(
         requested = PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
         if requested.unit_key == "design":
             raise SystemExit("interrupted")
-        return SimpleNamespace(pydantic=artifact(requested))
+        return raw_output(artifact(requested))
 
     install_staged_architect(monkeypatch, interrupted_artifact)
     with pytest.raises(SystemExit, match="interrupted"):
@@ -860,10 +1178,8 @@ def test_invalid_artifact_leaves_active_plan_unchanged(tmp_path, monkeypatch):
     def artifact_call(*, inputs, retry=False):
         requested = PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
         if requested.unit_key == "design":
-            return SimpleNamespace(
-                pydantic=PlanArtifactUnit(artifact="tasks", content="wrong unit")
-            )
-        return SimpleNamespace(pydantic=artifact(requested))
+            return raw_output(PlanArtifactUnit(artifact="tasks", content="wrong unit"))
+        return raw_output(artifact(requested))
 
     install_staged_architect(monkeypatch, artifact_call)
 
@@ -886,13 +1202,13 @@ def test_outline_empty_response_retries_once_without_using_length_budget(
     def outline_call(*, inputs):
         outline_calls.append(inputs)
         if len(outline_calls) == 1:
-            raise ValueError("Invalid response from LLM call - None or empty.")
-        return SimpleNamespace(pydantic=outline())
+            return SimpleNamespace(raw="")
+        return raw_output(outline())
 
     install_staged_architect(
         monkeypatch,
-        lambda *, inputs, retry=False: SimpleNamespace(
-            pydantic=artifact(
+        lambda *, inputs, retry=False: raw_output(
+            artifact(
                 PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
             )
         ),
@@ -905,7 +1221,9 @@ def test_outline_empty_response_retries_once_without_using_length_budget(
 
     assert result.phase == "implementing"
     assert len(outline_calls) == 2
-    assert result.phase_usage["planning:architect_empty_response_retries"] == 1
+    assert result.contract_output_retry_state == {}
+    assert result.planning_empty_response_retry_state == "consumed"
+    assert result.planning_empty_response_retry_target == "outline"
 
 
 def test_restart_after_outline_empty_retry_consumption_never_dispatches_it_again(
@@ -915,12 +1233,12 @@ def test_restart_after_outline_empty_retry_consumption_never_dispatches_it_again
     monkeypatch.setattr(
         main,
         "kickoff_role",
-        lambda role, **_: SimpleNamespace(pydantic=contract()),
+        lambda role, **_: raw_output(contract()),
     )
     monkeypatch.setattr(
         main,
         "kickoff_architect_outline",
-        lambda **_: (_ for _ in ()).throw(ValueError(main.EMPTY_ARCHITECT_RESPONSE)),
+        lambda **_: SimpleNamespace(raw=""),
     )
     original_save = workflow.save_execution
 
@@ -956,6 +1274,7 @@ def test_restart_after_outline_empty_retry_consumption_never_dispatches_it_again
     assert calls == []
     assert result.last_attempt == 1
     assert result.planning_empty_response_retry_state == "consumed"
+    assert result.planning_empty_response_retry_target == "outline"
 
 
 def test_restart_after_artifact_empty_retry_consumption_never_dispatches_it_again(
@@ -966,8 +1285,8 @@ def test_restart_after_artifact_empty_retry_consumption_never_dispatches_it_agai
     def empty_artifact(*, inputs, retry=False):
         requested = PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
         if requested.unit_key == "proposal":
-            raise ValueError(main.EMPTY_ARCHITECT_RESPONSE)
-        return SimpleNamespace(pydantic=artifact(requested))
+            return SimpleNamespace(raw="")
+        return raw_output(artifact(requested))
 
     install_staged_architect(monkeypatch, empty_artifact)
     original_save = workflow.save_execution
@@ -1014,16 +1333,15 @@ def test_empty_response_retry_budget_is_once_across_all_planning_units(
 ):
     prepare_planning_root(tmp_path, monkeypatch)
     calls = []
-    counts = {"proposal": 0, "design": 0}
+    counts = {"proposal": 0}
 
     def artifact_call(*, inputs, retry=False):
         requested = PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
         calls.append((requested.unit_key, retry))
-        if requested.unit_key in counts:
-            counts[requested.unit_key] += 1
-            if counts[requested.unit_key] == 1:
-                raise ValueError(main.EMPTY_ARCHITECT_RESPONSE)
-        return SimpleNamespace(pydantic=artifact(requested))
+        if requested.unit_key == "proposal":
+            counts["proposal"] += 1
+            return SimpleNamespace(raw="")
+        pytest.fail("the consumed operation-wide retry must block before design")
 
     install_staged_architect(monkeypatch, artifact_call)
 
@@ -1035,9 +1353,10 @@ def test_empty_response_retry_budget_is_once_across_all_planning_units(
     assert calls == [
         ("proposal", False),
         ("proposal", False),
-        ("design", False),
     ]
+    assert result.contract_output_retry_state == {}
     assert result.planning_empty_response_retry_state == "consumed"
+    assert result.planning_empty_response_retry_target == "proposal"
     assert result.last_attempt == 1
 
 
@@ -1049,14 +1368,14 @@ def test_empty_response_text_on_non_value_error_is_not_retried(
     monkeypatch.setattr(
         main,
         "kickoff_role",
-        lambda role, **_: SimpleNamespace(pydantic=contract()),
+        lambda role, **_: raw_output(contract()),
     )
 
     def outline_call(*, inputs):
         calls.append(inputs)
         if len(calls) == 1:
-            raise RuntimeError(main.EMPTY_ARCHITECT_RESPONSE)
-        return SimpleNamespace(pydantic=outline())
+            raise RuntimeError("empty contract output")
+        return raw_output(outline())
 
     monkeypatch.setattr(main, "kickoff_architect_outline", outline_call)
 
@@ -1066,7 +1385,7 @@ def test_empty_response_text_on_non_value_error_is_not_retried(
 
     assert result.phase == "blocked"
     assert len(calls) == 1
-    assert result.planning_empty_response_retry_state == "available"
+    assert result.contract_output_retry_state == {}
 
 
 def test_empty_response_retry_consumption_survives_outline_restart(
@@ -1077,27 +1396,24 @@ def test_empty_response_retry_consumption_survives_outline_restart(
     monkeypatch.setattr(
         main,
         "kickoff_role",
-        lambda role, **_: SimpleNamespace(pydantic=contract()),
+        lambda role, **_: raw_output(contract()),
     )
 
     def outline_call(*, inputs):
         calls.append(inputs)
         if len(calls) == 1:
-            raise ValueError(main.EMPTY_ARCHITECT_RESPONSE)
-        return SimpleNamespace(pydantic=outline())
+            return SimpleNamespace(raw="")
+        return raw_output(outline())
 
     monkeypatch.setattr(main, "kickoff_architect_outline", outline_call)
-    original_record = main._record_usage
+    original_save = workflow.save_execution
 
-    def stop_after_failed_usage(state, role, output, **kwargs):
-        original_record(state, role, output, **kwargs)
-        if (
-            kwargs.get("status") == "failed"
-            and getattr(state, "planning_empty_response_retry_state", None) == "pending"
-        ):
+    def stop_after_pending(ticket_id, state):
+        original_save(ticket_id, state)
+        if state.planning_empty_response_retry_state == "pending":
             raise SystemExit("stopped after empty-response failure")
 
-    monkeypatch.setattr(main, "_record_usage", stop_after_failed_usage)
+    monkeypatch.setattr(workflow, "save_execution", stop_after_pending)
 
     with pytest.raises(SystemExit, match="empty-response failure"):
         main.run_planning(
@@ -1108,13 +1424,14 @@ def test_empty_response_retry_consumption_survives_outline_restart(
 
     resumed = workflow.load_execution("DEV-40")
     assert resumed.planning_empty_response_retry_state == "pending"
+    assert resumed.planning_empty_response_retry_target == "outline"
     assert resumed.last_attempt == 1
 
-    monkeypatch.setattr(main, "_record_usage", original_record)
+    monkeypatch.setattr(workflow, "save_execution", original_save)
     install_staged_architect(
         monkeypatch,
-        lambda *, inputs, retry=False: SimpleNamespace(
-            pydantic=artifact(
+        lambda *, inputs, retry=False: raw_output(
+            artifact(
                 PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
             )
         ),
@@ -1125,17 +1442,14 @@ def test_empty_response_retry_consumption_survives_outline_restart(
 
     assert result.phase == "implementing"
     assert result.planning_empty_response_retry_state == "consumed"
+    assert result.planning_empty_response_retry_target == "outline"
     assert result.last_attempt == 1
     assert len(calls) == 2
     usage_dir = workflow.ticket_contract_path("dev-40", 1).parent
-    first_usage = json.loads(
+    usage = json.loads(
         (usage_dir / "phase-usage-planning-architect-outline-outline-1.json").read_text()
     )
-    second_usage = json.loads(
-        (usage_dir / "phase-usage-planning-architect-outline-outline-2.json").read_text()
-    )
-    assert first_usage["status"] == "failed"
-    assert second_usage["status"] == "completed"
+    assert usage["status"] == "completed"
 
 
 def test_resume_rejects_persisted_catalog_when_context_snapshot_changed(
@@ -1144,8 +1458,8 @@ def test_resume_rejects_persisted_catalog_when_context_snapshot_changed(
     prepare_planning_root(tmp_path, monkeypatch)
     install_staged_architect(
         monkeypatch,
-        lambda *, inputs, retry=False: SimpleNamespace(
-            pydantic=artifact(
+        lambda *, inputs, retry=False: raw_output(
+            artifact(
                 PlanUnitOutline.model_validate_json(inputs["plan_unit_outline_json"])
             )
         ),
@@ -1270,7 +1584,10 @@ def test_each_repair_uses_a_retained_new_attempt_directory(tmp_path, monkeypatch
     assert first_pack.is_file()
     assert second_pack.is_file()
     assert state.last_attempt == 4
-    assert (tmp_path / "openspec/changes/dev-40/attempts/3/phase-usage-implementing-programmer.json").is_file()
+    assert (
+        tmp_path
+        / "openspec/changes/dev-40/attempts/3/phase-usage-implementing-programmer-implementing-programmer-1.json"
+    ).is_file()
 
 
 def test_resume_blocks_ticket_repairs_after_the_persisted_budget(tmp_path, monkeypatch):
@@ -1399,6 +1716,72 @@ def test_tester_failure_transitions_to_blocked(tmp_path, monkeypatch):
     assert "provider down" in result.phase_usage["blocked_reason"]
 
 
+def test_tester_invalid_contract_retry_does_not_block_the_next_browser_cycle(
+    tmp_path, monkeypatch
+):
+    state = prepare_state(tmp_path, monkeypatch, phase="browser_testing", profile="browser")
+    calls = []
+
+    def kickoff(role, **_):
+        calls.append(role)
+        if role == "tester":
+            tester_calls = calls.count("tester")
+            if tester_calls == 1:
+                return SimpleNamespace(raw="{invalid")
+            if tester_calls == 2:
+                return raw_output(TesterResult(status="failed", summary="repair needed"))
+            return raw_output(TesterResult(status="passed", summary="repaired"))
+        return SimpleNamespace(raw="fixed")
+
+    monkeypatch.setattr(main, "kickoff_role", kickoff)
+    monkeypatch.setattr(main, "run_base_gates", lambda *_: passed_gates())
+
+    state = main.run_browser_testing("DEV-40", "dev-40", state)
+    assert state.phase == "implementing"
+    assert state.contract_output_retry_state == {}
+    state = main.run_programmer("DEV-40", "dev-40", state)
+    state = main.run_verification("DEV-40", "dev-40", state)
+    result = main.run_browser_testing("DEV-40", "dev-40", state)
+
+    assert result.phase == "reviewing"
+    assert calls == ["tester", "tester", "programmer", "tester"]
+
+
+def test_tester_retry_stays_consumed_until_browser_result_is_persisted(
+    tmp_path, monkeypatch
+):
+    state = prepare_state(tmp_path, monkeypatch, phase="browser_testing", profile="browser")
+    calls = []
+
+    def kickoff(role, **_):
+        calls.append(role)
+        if len(calls) == 1:
+            return SimpleNamespace(raw="{invalid")
+        return raw_output(TesterResult(status="passed", summary="passed"))
+
+    monkeypatch.setattr(main, "kickoff_role", kickoff)
+    original_save_model = workflow.save_model
+    browser_path = workflow.browser_result_path("dev-40", state.last_attempt)
+
+    def crash_after_browser_result(path, value):
+        original_save_model(path, value)
+        if path == browser_path:
+            raise SystemExit("stopped after browser result persistence")
+
+    monkeypatch.setattr(workflow, "save_model", crash_after_browser_result)
+    with pytest.raises(SystemExit, match="browser result persistence"):
+        main.run_browser_testing("DEV-40", "dev-40", state)
+
+    resumed = workflow.load_execution("DEV-40")
+    assert resumed.contract_output_retry_state == {"tester": "consumed"}
+    monkeypatch.setattr(workflow, "save_model", original_save_model)
+
+    result = main.run_browser_testing("DEV-40", "dev-40", resumed)
+
+    assert result.phase == "blocked"
+    assert calls == ["tester", "tester"]
+
+
 def test_failed_browser_tester_returns_only_to_programmer(tmp_path, monkeypatch):
     state = prepare_state(tmp_path, monkeypatch, phase="browser_testing", profile="browser")
     calls = []
@@ -1406,7 +1789,7 @@ def test_failed_browser_tester_returns_only_to_programmer(tmp_path, monkeypatch)
     def kickoff(role, **_):
         calls.append(role)
         if role == "tester":
-            return SimpleNamespace(pydantic=TesterResult(status="failed", summary="scenario failed"))
+            return raw_output(TesterResult(status="failed", summary="scenario failed"))
         return SimpleNamespace(raw="fixed")
 
     monkeypatch.setattr(main, "kickoff_role", kickoff)
@@ -1428,8 +1811,8 @@ def test_reviewer_retry_returns_only_to_programmer(tmp_path, monkeypatch):
     def kickoff(role, **_):
         calls.append(role)
         if role == "reviewer":
-            return SimpleNamespace(
-                pydantic=ReviewVerdict(
+            return raw_output(
+                ReviewVerdict(
                     ticket_id="DEV-40",
                     change_id="dev-40",
                     status="retryable_failure",
@@ -1448,6 +1831,102 @@ def test_reviewer_retry_returns_only_to_programmer(tmp_path, monkeypatch):
     assert calls == ["reviewer", "programmer"]
 
 
+def test_reviewer_invalid_contract_retry_does_not_block_the_next_repair_review(
+    tmp_path, monkeypatch
+):
+    state = prepare_state(tmp_path, monkeypatch, phase="verifying")
+    calls = []
+
+    def kickoff(role, **_):
+        calls.append(role)
+        if role == "reviewer":
+            reviewer_calls = calls.count("reviewer")
+            if reviewer_calls == 1:
+                return SimpleNamespace(raw="{invalid")
+            if reviewer_calls == 2:
+                return raw_output(
+                    ReviewVerdict(
+                        ticket_id="DEV-40",
+                        change_id="dev-40",
+                        status="retryable_failure",
+                        summary="repair needed",
+                    )
+                )
+            return raw_output(
+                ReviewVerdict(
+                    ticket_id="DEV-40",
+                    change_id="dev-40",
+                    status="approved",
+                    summary="approved",
+                )
+            )
+        return SimpleNamespace(raw="fixed")
+
+    monkeypatch.setattr(main, "kickoff_role", kickoff)
+    monkeypatch.setattr(main, "run_base_gates", lambda *_: passed_gates())
+    monkeypatch.setattr(main, "_changed_paths", lambda: [])
+    monkeypatch.setattr(main, "_diff_summary", lambda: "No changes.")
+
+    state = main.run_verification("DEV-40", "dev-40", state)
+    state = main.run_review("DEV-40", "dev-40", state)
+    assert state.phase == "implementing"
+    assert state.contract_output_retry_state == {}
+    state = main.run_programmer("DEV-40", "dev-40", state)
+    state = main.run_verification("DEV-40", "dev-40", state)
+    result = main.run_review("DEV-40", "dev-40", state)
+
+    assert result.phase == "approved"
+    assert calls == ["reviewer", "reviewer", "programmer", "reviewer"]
+
+
+def test_reviewer_retry_stays_consumed_until_accepted_phase_is_persisted(
+    tmp_path, monkeypatch
+):
+    state = prepare_state(tmp_path, monkeypatch, phase="verifying")
+    calls = []
+
+    def kickoff(role, **_):
+        calls.append(role)
+        if len(calls) == 1:
+            return SimpleNamespace(raw="{invalid")
+        return raw_output(
+            ReviewVerdict(
+                ticket_id="DEV-40",
+                change_id="dev-40",
+                status="approved",
+                summary="approved",
+            )
+        )
+
+    monkeypatch.setattr(main, "kickoff_role", kickoff)
+    monkeypatch.setattr(main, "run_base_gates", lambda *_: passed_gates())
+    monkeypatch.setattr(main, "_changed_paths", lambda: [])
+    monkeypatch.setattr(main, "_diff_summary", lambda: "No changes.")
+    state = main.run_verification("DEV-40", "dev-40", state)
+    original_save_execution = workflow.save_execution
+
+    def crash_before_reviewer_acknowledgement(ticket_id, value):
+        original_save_execution(ticket_id, value)
+        if (
+            value.phase == "approved"
+            and value.contract_output_retry_state == {"reviewer": "consumed"}
+        ):
+            raise SystemExit("stopped after accepted reviewer phase")
+
+    monkeypatch.setattr(workflow, "save_execution", crash_before_reviewer_acknowledgement)
+    with pytest.raises(SystemExit, match="accepted reviewer phase"):
+        main.run_review("DEV-40", "dev-40", state)
+
+    resumed = workflow.load_execution("DEV-40")
+    assert resumed.contract_output_retry_state == {"reviewer": "consumed"}
+    monkeypatch.setattr(workflow, "save_execution", original_save_execution)
+
+    result = main.run_review("DEV-40", "dev-40", resumed)
+
+    assert result.phase == "blocked"
+    assert calls == ["reviewer", "reviewer"]
+
+
 def test_replan_atomically_clears_current_contract_references_before_running(tmp_path, monkeypatch):
     state = prepare_state(tmp_path, monkeypatch)
     state.repair_pack_path = "openspec/changes/dev-40/attempts/2/repair-pack.json"
@@ -1455,8 +1934,7 @@ def test_replan_atomically_clears_current_contract_references_before_running(tmp
     state.browser_result_path = "openspec/changes/dev-40/attempts/2/browser-result.json"
     state.planning_checkpoint_path = "openspec/changes/dev-40/attempts/2/planning-checkpoint.json"
     state.planning_checkpoint_sha256 = "c" * 64
-    state.planning_empty_response_retry_state = "consumed"
-    state.planning_empty_response_retry_target = "proposal"
+    state.contract_output_retry_state = {"architect:artifact:proposal": "consumed"}
     state.phase_usage["prior_evidence"] = "openspec/changes/dev-40/attempts/1/lint.log"
     saved = []
     observed = []
@@ -1477,8 +1955,7 @@ def test_replan_atomically_clears_current_contract_references_before_running(tmp
     assert saved[0].browser_result_path is None
     assert saved[0].planning_checkpoint_path is None
     assert saved[0].planning_checkpoint_sha256 is None
-    assert saved[0].planning_empty_response_retry_state == "available"
-    assert saved[0].planning_empty_response_retry_target is None
+    assert saved[0].contract_output_retry_state == {}
     assert saved[0].last_attempt == 3
     assert saved[0].phase_usage["prior_evidence"].endswith("lint.log")
     assert observed[0].phase == "planning"
@@ -1497,8 +1974,8 @@ def test_review_pack_uses_completion_artifact_for_unchecked_tasks(tmp_path, monk
     monkeypatch.setattr(
         main,
         "kickoff_role",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            pydantic=ReviewVerdict(
+        lambda *_args, **_kwargs: raw_output(
+            ReviewVerdict(
                 ticket_id="DEV-40",
                 change_id="dev-40",
                 status="approved",
@@ -1532,8 +2009,8 @@ def test_unchanged_task_manifest_completes_review_and_finalization(tmp_path, mon
 
     def kickoff(role, **_):
         if role == "reviewer":
-            return SimpleNamespace(
-                pydantic=ReviewVerdict(
+            return raw_output(
+                ReviewVerdict(
                     ticket_id="DEV-40",
                     change_id="dev-40",
                     status="approved",

@@ -3,13 +3,6 @@ from pathlib import Path
 
 import pytest
 from crew.crew import KotyAppCrew
-from crew.models import (
-    PlanArtifactUnit,
-    PlanOutline,
-    ReviewVerdict,
-    TesterResult as BrowserTesterResult,
-    TicketContract,
-)
 from crewai import Process
 from crewai.tools.tool_failure import ToolFailurePolicy
 from crewai.utilities.constants import NOT_SPECIFIED
@@ -66,10 +59,13 @@ def test_reviewer_no_recibe_gates_autoritativas(monkeypatch):
     assert "Buscar Tarea en Linear" not in tool_names
 
 
-def test_review_task_returns_a_qualitative_verdict(monkeypatch):
+def test_review_task_uses_raw_contract_output(monkeypatch):
     configure_models(monkeypatch)
 
-    assert KotyAppCrew().review_task().output_pydantic is ReviewVerdict
+    task = KotyAppCrew().review_task()
+
+    assert task.output_pydantic is None
+    assert task.output_json is None
 
 
 def test_analyst_eleva_fallos_de_herramientas(monkeypatch):
@@ -140,12 +136,18 @@ def test_each_role_runs_in_an_isolated_one_task_crew(
 
 
 @pytest.mark.parametrize(
-    ("agent_method", "max_iter", "max_tokens"),
+    (
+        "agent_method",
+        "max_iter",
+        "max_tokens",
+        "max_retries",
+        "max_retry_limit",
+    ),
     [
-        ("analyst", 4, 2000),
-        ("programer", 20, 2500),
-        ("tester", 8, 600),
-        ("reviewer", 8, 800),
+        ("analyst", 4, 2000, 0, 0),
+        ("programer", 20, 2500, 2, 2),
+        ("tester", 8, 600, 0, 0),
+        ("reviewer", 8, 800, 0, 0),
     ],
 )
 def test_each_role_uses_its_documented_default_limits(
@@ -153,6 +155,8 @@ def test_each_role_uses_its_documented_default_limits(
     agent_method,
     max_iter,
     max_tokens,
+    max_retries,
+    max_retry_limit,
 ):
     configure_models(monkeypatch)
 
@@ -163,15 +167,16 @@ def test_each_role_uses_its_documented_default_limits(
     assert agent.llm.temperature == 0.2
     assert agent.respect_context_window is True
     assert agent.allow_delegation is False
-    assert agent.llm.max_retries == 2
+    assert agent.llm.max_retries == max_retries
+    assert agent.max_retry_limit == max_retry_limit
 
 
 @pytest.mark.parametrize(
-    ("crew_method", "kwargs", "max_tokens", "output_pydantic"),
+    ("crew_method", "kwargs", "max_tokens"),
     [
-        ("architect_outline_crew", {}, 4000, PlanOutline),
-        ("architect_artifact_crew", {}, 8000, PlanArtifactUnit),
-        ("architect_artifact_crew", {"retry": True}, 16000, PlanArtifactUnit),
+        ("architect_outline_crew", {}, 4000),
+        ("architect_artifact_crew", {}, 8000),
+        ("architect_artifact_crew", {"retry": True}, 16000),
     ],
 )
 def test_architect_crews_disable_hidden_calls_and_remain_isolated(
@@ -179,7 +184,6 @@ def test_architect_crews_disable_hidden_calls_and_remain_isolated(
     crew_method,
     kwargs,
     max_tokens,
-    output_pydantic,
 ):
     configure_models(monkeypatch)
     crew = getattr(KotyAppCrew(), crew_method)(**kwargs)
@@ -189,7 +193,8 @@ def test_architect_crews_disable_hidden_calls_and_remain_isolated(
     assert len(crew.agents) == 1
     assert len(crew.tasks) == 1
     assert task.agent is agent
-    assert task.output_pydantic is output_pydantic
+    assert task.output_pydantic is None
+    assert task.output_json is None
     assert task.context is NOT_SPECIFIED
     assert crew.process is Process.sequential
     assert crew.manager_agent is None
@@ -253,14 +258,21 @@ def test_architect_crews_honor_independent_configured_token_limits(monkeypatch):
     assert crew.architect_artifact_crew().agents[0].llm.max_tokens == 8200
 
 
-def test_tasks_bind_structured_contract_outputs(monkeypatch):
+def test_structured_contract_tasks_use_raw_outputs(monkeypatch):
     configure_models(monkeypatch)
     crew = KotyAppCrew()
 
-    assert crew.analysis_task().output_pydantic is TicketContract
-    assert crew.architect_outline_crew().tasks[0].output_pydantic is PlanOutline
-    assert crew.architect_artifact_crew().tasks[0].output_pydantic is PlanArtifactUnit
-    assert crew.testing_task().output_pydantic is BrowserTesterResult
+    tasks = (
+        crew.analysis_task(),
+        crew.architect_outline_crew().tasks[0],
+        crew.architect_artifact_crew().tasks[0],
+        crew.testing_task(),
+        crew.review_task(),
+    )
+
+    for task in tasks:
+        assert task.output_pydantic is None
+        assert task.output_json is None
 
 
 def test_architect_tasks_receive_only_their_staged_inputs(monkeypatch):

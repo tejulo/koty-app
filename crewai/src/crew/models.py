@@ -350,6 +350,9 @@ class ExecutionState(BaseModel):
     planning_checkpoint_sha256: str | None = Field(
         default=None, pattern=r"[0-9a-f]{64}"
     )
+    contract_output_retry_state: dict[str, Literal["pending", "consumed"]] = Field(
+        default_factory=dict
+    )
     planning_empty_response_retry_state: Literal[
         "available", "pending", "consumed"
     ] = "available"
@@ -371,6 +374,8 @@ class ExecutionState(BaseModel):
             raise ValueError(
                 "ExecutionState planning checkpoint path and hash must be set together"
             )
+        if any(not target for target in self.contract_output_retry_state):
+            raise ValueError("ExecutionState has an empty contract output retry target")
         if self.planning_empty_response_retry_state == "available":
             if self.planning_empty_response_retry_target is not None:
                 raise ValueError(

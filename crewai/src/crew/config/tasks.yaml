@@ -8,6 +8,8 @@ analysis_task:
     Produce exclusivamente un TicketContract fiel al ticket, con objetivo,
     alcance, criterios de aceptación con IDs AC-*, restricciones,
     dependencias y ambigüedades. No inventes información.
+    Responde con exactamente un objeto JSON que coincida con TicketContract,
+    sin prosa ni bloques Markdown.
   expected_output: >
     Un TicketContract válido.
   agent: analyst
@@ -27,6 +29,8 @@ architect_outline_task:
     unidad selecciona solo referencias conocidas del índice. No uses
     herramientas, no escribas archivos y no calcules hashes: el supervisor
     persiste y valida el resultado.
+    Responde con exactamente un objeto JSON que coincida con PlanOutline,
+    sin prosa ni bloques Markdown.
   expected_output: >
     Un PlanOutline válido.
 
@@ -55,6 +59,8 @@ architect_artifact_task:
     contener al menos un escenario encabezado #### Scenario:. No uses
     herramientas, no escribas archivos y no calcules hashes: el supervisor
     persiste y valida el resultado.
+    Responde con exactamente un objeto JSON que coincida con PlanArtifactUnit,
+    sin prosa ni bloques Markdown.
   expected_output: >
     Un PlanArtifactUnit válido.
 
@@ -78,6 +84,8 @@ testing_task:
     y los escenarios persistidos en '{scenario_paths}'. Ejecuta solo los
     escenarios indicados cuando el perfil requiera Browser E2E; de otro modo
     devuelve status=skipped. No modifiques código ni inventes resultados.
+    Responde con exactamente un objeto JSON que coincida con TesterResult,
+    sin prosa ni bloques Markdown.
   expected_output: >
     Resultado estructurado con status, summary y scenarios.
   agent: tester
@@ -89,6 +97,8 @@ review_task:
     los archivos y la evidencia que referencia. Devuelve approved solo si el
     pack sustenta cada criterio de aceptación; usa retryable_failure cuando
     Programmer puede corregirlo o blocked si requiere intervención humana.
+    Responde con exactamente un objeto JSON que coincida con ReviewVerdict,
+    sin prosa ni bloques Markdown.
   expected_output: >
     Resultado estructurado con ticket_id, change_id, status,
     failure_type, failure_stage y summary.
