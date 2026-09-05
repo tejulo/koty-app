@@ -419,6 +419,14 @@ def test_architect_artifact_prompt_requires_exact_design_and_spec_contracts(
     assert "`verification_profile: <profile>`" in description
 
 
+def test_architect_outline_prompt_limits_context_references(monkeypatch):
+    configure_models(monkeypatch)
+
+    description = KotyAppCrew().architect_outline_crew().tasks[0].description
+
+    assert "como máximo 12 referencias" in description
+
+
 def test_env_example_documents_staged_architect_defaults():
     env_example = Path(__file__).parents[1] / ".env.example"
     values = {

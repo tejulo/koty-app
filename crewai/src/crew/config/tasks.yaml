@@ -35,8 +35,8 @@ architect_outline_task:
 
     Devuelve exclusivamente un PlanOutline con profile, acceptance_map y una
     PlanUnitOutline para proposal, design, tasks y cada spec requerida. Cada
-    unidad selecciona solo referencias conocidas del índice. No uses herramientas,
-    no escribas archivos y no calcules hashes: el supervisor
+    unidad selecciona solo referencias conocidas del índice y como máximo 12
+    referencias. No uses herramientas, no escribas archivos y no calcules hashes: el supervisor
     persiste y valida el resultado.
     Contrato JSON exacto PlanOutline, con estas claves y tipos:
     `schema_version` (integer literal 1), `profile` (string literal: standard,

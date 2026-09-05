@@ -246,6 +246,13 @@ def test_plan_outline_requires_exactly_one_of_each_core_unit_and_valid_specs():
             extra="forbidden",
         )
 
+    with pytest.raises(ValidationError, match="context_refs"):
+        PlanUnitOutline(
+            artifact="proposal",
+            objective="Too much context.",
+            context_refs=["context-001"] * 13,
+        )
+
 
 def test_planning_contract_identifiers_require_full_pattern_matches():
     with pytest.raises(ValidationError, match="ref"):
