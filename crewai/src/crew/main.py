@@ -157,6 +157,7 @@ def _as_model(output: object, model_type: type[ModelT]) -> ModelT:
     if not isinstance(raw, str):
         raise ValueError(f"Role did not return raw JSON for {model_type.__name__}")
     raw = raw.strip()
+    raw = re.sub(r"^<think>.*?</think>\s*", "", raw, count=1, flags=re.DOTALL)
     fence = re.fullmatch(r"```json\n(.*)\n```", raw, flags=re.DOTALL)
     return model_type.model_validate_json(fence.group(1) if fence else raw)
 
