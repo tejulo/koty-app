@@ -1008,10 +1008,18 @@ def run_programmer(ticket_id: str, change_id: str, state: ExecutionState) -> Exe
                 raise ValueError("Execution state has invalid repair attempts")
             maximum = int(os.environ.get(
                 "MAX_INFRASTRUCTURE_ATTEMPTS" if budget == "infrastructure" else "MAX_TICKET_ATTEMPTS",
-                "2" if budget == "infrastructure" else "3",
+                "2" if budget == "infrastructure" else "4",
             ))
             if attempts[budget] >= maximum:
-                return _block(state, f"Se alcanzaron {maximum} intentos de reparación {budget}.")
+                state.phase_usage["human_evaluation_required"] = {
+                    "budget": budget,
+                    "maximum": maximum,
+                    "repair_pack_path": state.repair_pack_path,
+                }
+                return _block(
+                    state,
+                    f"Se requieren evaluación humana tras {maximum} reparaciones {budget}.",
+                )
             attempts[budget] += 1
             pack = workflow.load_model(_project_path(state.repair_pack_path), RepairPack)
             if not pack.repair_scope:
@@ -1118,6 +1126,11 @@ def run_browser_testing(ticket_id: str, change_id: str, state: ExecutionState) -
             state.browser_result_path = _relative(path)
             state.phase = "reviewing"
             return state
+        scenario_paths = "\n".join(
+            _relative(active_change(change_id) / artifact)
+            for artifact in manifest.artifacts
+            if artifact.startswith("specs/")
+        )
         result = _dispatch_contract(
             ticket_id,
             state,
@@ -1130,7 +1143,7 @@ def run_browser_testing(ticket_id: str, change_id: str, state: ExecutionState) -
                     "verification_profile_path": _relative(
                         active_change(change_id) / "design.md"
                     ),
-                    "scenario_paths": "NONE",
+                    "scenario_paths": scenario_paths,
                 },
             ),
             stage="browser_testing",

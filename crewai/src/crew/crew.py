@@ -63,6 +63,7 @@ def _zen_llm(
             "Falta OPENCODE_API_KEY"
         )
 
+    temperature = 1 if model == "openai/kimi-k2.7-code" else 0.2
     options = {
         "model": model,
         "base_url": os.environ.get(
@@ -70,7 +71,7 @@ def _zen_llm(
             DEFAULT_ZEN_BASE_URL,
         ),
         "api_key": api_key,
-        "temperature": 0.2,
+        "temperature": temperature,
         "reasoning_effort": reasoning_effort,
         "max_tokens": int(
             os.environ.get(

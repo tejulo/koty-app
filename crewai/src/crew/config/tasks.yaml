@@ -70,12 +70,20 @@ architect_artifact_task:
     Devuelve un PlanArtifactUnit que corresponda exactamente al artifact y
     capability solicitados. Si es design, debe declarar exactamente un
     verification_profile igual a PlanOutline.profile y declarar explícitamente
-    Browser E2E: required o Browser E2E: not_required. Si es spec, debe usar los
-    encabezados OpenSpec exactos ## ADDED Requirements, ## MODIFIED Requirements,
-    ## REMOVED Requirements o ## RENAMED Requirements, y cada requisito debe
-    contener al menos un escenario encabezado #### Scenario:. No uses herramientas,
-    no escribas archivos y no calcules hashes: el supervisor
-    persiste y valida el resultado.
+    Browser E2E: required o Browser E2E: not_required. Si es design, incluye el
+    perfil y Browser E2E dentro de `content`, no como claves JSON adicionales:
+    escribe exactamente una línea `verification_profile: <profile>` y una línea
+    `Browser E2E: required` o `Browser E2E: not_required`. El valor debe igualar
+    PlanOutline.profile. El JSON debe contener únicamente las claves del contrato
+    indicado. Si es spec, debe usar los encabezados OpenSpec exactos ## ADDED
+    Requirements, ## MODIFIED Requirements, ## REMOVED Requirements o ## RENAMED
+    Requirements. Cada requisito debe comenzar exactamente con
+    `### Requirement: <nombre>`, usar `SHALL` o `MUST` en mayúsculas en su
+    declaración normativa y contener al menos un escenario encabezado exactamente
+    `#### Scenario:`. No uses IDs en el encabezado del requisito, no uses `shall`
+    o `must` en minúsculas y no pongas contenido entre el encabezado delta y el
+    primer requisito. No uses herramientas, no escribas archivos y no calcules
+    hashes: el supervisor persiste y valida el resultado.
     Contrato JSON exacto PlanArtifactUnit, con estas claves y tipos:
     `schema_version` (integer literal 1), `artifact` (string literal: proposal,
     design, tasks, or spec), optional

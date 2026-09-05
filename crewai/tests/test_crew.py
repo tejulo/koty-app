@@ -171,6 +171,17 @@ def test_each_role_uses_its_documented_default_limits(
     assert agent.max_retry_limit == max_retry_limit
 
 
+def test_kimi_coder_and_reviewer_use_its_required_temperature(monkeypatch):
+    configure_models(monkeypatch)
+    monkeypatch.setenv("ZEN_CODER_MODEL", "openai/kimi-k2.7-code")
+    monkeypatch.setenv("ZEN_REVIEWER_MODEL", "openai/kimi-k2.7-code")
+
+    crew = KotyAppCrew()
+
+    assert crew.programer().llm.temperature == 1
+    assert crew.reviewer().llm.temperature == 1
+
+
 @pytest.mark.parametrize(
     ("crew_method", "kwargs", "max_tokens"),
     [
@@ -402,6 +413,10 @@ def test_architect_artifact_prompt_requires_exact_design_and_spec_contracts(
     assert "## REMOVED Requirements" in description
     assert "## RENAMED Requirements" in description
     assert "#### Scenario:" in description
+    assert "### Requirement:" in description
+    assert "usar `SHALL` o `MUST`" in description
+    assert "dentro de `content`" in description
+    assert "`verification_profile: <profile>`" in description
 
 
 def test_env_example_documents_staged_architect_defaults():
