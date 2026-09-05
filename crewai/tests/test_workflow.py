@@ -503,6 +503,42 @@ def test_save_execution_replaces_state_atomically_and_rejects_non_json_data(
         workflow.save_execution("DEV-40", unsafe)
 
 
+def test_execution_state_preserves_legacy_empty_response_retry_state_when_loaded():
+    pending = ExecutionState.model_validate_json(
+        '{"ticket_id":"DEV-40","planning_empty_response_retry_state":"pending","planning_empty_response_retry_target":"outline"}'
+    )
+    consumed = ExecutionState.model_validate_json(
+        '{"ticket_id":"DEV-40","planning_empty_response_retry_state":"consumed","planning_empty_response_retry_target":"proposal"}'
+    )
+
+    assert pending.planning_empty_response_retry_state == "pending"
+    assert pending.planning_empty_response_retry_target == "outline"
+    assert consumed.planning_empty_response_retry_state == "consumed"
+    assert consumed.planning_empty_response_retry_target == "proposal"
+
+
+def test_execution_state_bounds_contract_output_retries_to_named_pending_or_consumed_targets():
+    available = ExecutionState(ticket_id="DEV-40")
+    pending = ExecutionState(
+        ticket_id="DEV-40",
+        contract_output_retry_state={"architect:artifact:proposal": "pending"},
+    )
+    consumed = ExecutionState(
+        ticket_id="DEV-40",
+        contract_output_retry_state={"reviewer": "consumed"},
+    )
+
+    assert available.contract_output_retry_state == {}
+    assert pending.contract_output_retry_state == {
+        "architect:artifact:proposal": "pending"
+    }
+    assert consumed.contract_output_retry_state == {"reviewer": "consumed"}
+    with pytest.raises(ValidationError, match="contract output retry target"):
+        ExecutionState(
+            ticket_id="DEV-40", contract_output_retry_state={"": "pending"}
+        )
+
+
 def test_repair_pack_rejects_a_successful_gate_and_persists_failure_stage(
     tmp_path, monkeypatch
 ):

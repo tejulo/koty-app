@@ -36,6 +36,34 @@ ticket, plan, task-completion, repair, review, browser-result, or evidence
 hashes. A changed ticket hash invalidates planning; all other stale or
 inconsistent contracts are blocked rather than consumed.
 
+## Portable Raw JSON Contract Transport
+
+Every structured role invocation returns its contract as raw JSON text rather
+than relying on a provider or CrewAI structured-output transport. This applies
+to Analyst, both Architect invocation types, Tester, and Reviewer. Programmer
+remains intentionally unstructured. The supervisor retains the exact raw
+response as attempt evidence, parses it locally with the expected Pydantic
+model, and treats that local validation as authoritative. Provider-side
+decoding, schema enforcement, or a constructed model is not accepted as proof
+that a contract is valid.
+
+After local Pydantic parsing, the existing semantic, cross-contract, hash, and
+stage-boundary validation remains mandatory and unchanged. A Pydantic failure
+includes malformed JSON, a non-object response, or a response that does not
+match the expected contract. The supervisor atomically records the raw output,
+validation failure, role, expected model, invocation, and retry state as
+attempt evidence. It records an invalid-output retry as `pending`, marks it
+`consumed` before external dispatch, and retries that same structured invocation
+at most once. The retry response is retained and locally validated in the same
+way. A second invalid response, or a restart that finds a consumed retry without
+a persisted validated result, blocks the current phase without advancing its
+stage boundary.
+
+The invalid-output retry is independent of, and does not relax or consume, the
+existing Architect empty-response and length retry guarantees. Architect's
+staged units, checkpoints, configured length budgets, and retry ownership remain
+unchanged.
+
 ## Staged Architect Planning
 
 After Analyst produces TicketContract, the supervisor builds an attempt-scoped
@@ -148,12 +176,14 @@ not repeat the outline or completed units.
 
 Each role is a one-task CrewAI invocation. Analyst produces TicketContract;
 Architect uses separate outline and artifact-unit crews to produce the staged
-contracts without tools; the supervisor assembles the existing PlanDraft and
+contracts as raw JSON text without tools; the supervisor locally validates them,
+assembles the existing PlanDraft and
 passes it to `write_plan_draft()` to write and hash the active OpenSpec artifacts
 for PlanManifest. Programmer reads
 PlanManifest and the current RepairPack; Tester receives browser inputs only
 when required; Reviewer reads ReviewPack rather than other roles'
-conversations. Default limits are Analyst `4`/`2000`, Architect outline
+conversations. Analyst, Architect, Tester, and Reviewer use the raw JSON
+transport; Programmer remains intentionally unstructured. Default limits are Analyst `4`/`2000`, Architect outline
 `1`/`4000`, Architect artifact `1`/`8000`, Programmer `20`/`2500`, Tester
 `8`/`600`, and Reviewer `8`/`800` for `max_iter`/`max_tokens`; an Architect
 artifact length retry uses `16000` max tokens.

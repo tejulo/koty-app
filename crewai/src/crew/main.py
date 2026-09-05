@@ -5,7 +5,8 @@ import re
 import subprocess
 import argparse
 from pathlib import Path
-from typing import TypeVar
+from types import SimpleNamespace
+from typing import Callable, TypeVar
 
 from dotenv import load_dotenv
 from openai import LengthFinishReasonError
@@ -21,6 +22,7 @@ from .models import (
     PlanArtifactUnit,
     PlanManifest,
     PlanOutline,
+    PlanUnitOutline,
     PlanningCheckpoint,
     ProjectContextCatalog,
     RepairPack,
@@ -63,6 +65,14 @@ ROLE_CREWS = {
 }
 EMPTY_ARCHITECT_RESPONSE = "Invalid response from LLM call - None or empty."
 ModelT = TypeVar("ModelT", bound=BaseModel)
+
+
+class ContractOutputRetryExhausted(ValueError):
+    pass
+
+
+class EmptyArchitectResponse(ValueError):
+    pass
 
 
 def normalize(raw_id: str) -> tuple[str, str]:
@@ -143,12 +153,19 @@ def _selected_profile(change_id: str) -> str:
 
 
 def _as_model(output: object, model_type: type[ModelT]) -> ModelT:
-    value = getattr(output, "pydantic", None)
-    if isinstance(value, model_type):
-        return value
-    if value is not None:
-        return model_type.model_validate(value)
-    raise ValueError(f"Role did not return {model_type.__name__}")
+    raw = getattr(output, "raw", None)
+    if not isinstance(raw, str):
+        raise ValueError(f"Role did not return raw JSON for {model_type.__name__}")
+    raw = raw.strip()
+    fence = re.fullmatch(r"```json\n(.*)\n```", raw, flags=re.DOTALL)
+    return model_type.model_validate_json(fence.group(1) if fence else raw)
+
+
+def _is_empty_architect_response(value: object) -> bool:
+    if isinstance(value, ValueError) and str(value) == EMPTY_ARCHITECT_RESPONSE:
+        return True
+    raw = getattr(value, "raw", None)
+    return isinstance(raw, str) and not raw.strip()
 
 
 def _serializable(value: object) -> object:
@@ -201,6 +218,8 @@ def _record_usage(
     effective_limit: int | None = None,
     error: BaseException | None = None,
     retry: bool = False,
+    expected_model: str | None = None,
+    retry_state: str | None = None,
 ) -> None:
     phase = state.phase
     attempt = _attempt(state)
@@ -222,29 +241,295 @@ def _record_usage(
         "status": status,
         "effective_limit": max_tokens,
         "error_type": type(error).__name__ if error is not None else None,
+        "validation_error": str(error) if error is not None else None,
+        "expected_model": expected_model,
+        "retry_state": retry_state,
         "length_failure": _is_length_finish_reason(error) if error is not None else False,
         "retry": retry,
         "model": os.environ.get(model_env),
         "limits": {"max_iter": max_iter, "max_tokens": max_tokens},
         "attempt": attempt,
         "usage": _serializable(usage) if usage is not None else None,
+        "raw": getattr(output, "raw", None)
+        if isinstance(getattr(output, "raw", None), str)
+        else None,
     }
-    filename = f"phase-usage-{phase}-{role}"
-    if role == "architect":
-        safe_unit = re.sub(r"[^a-zA-Z0-9-]+", "-", unit or "none").strip("-")
-        filename += f"-{stage}-{safe_unit}-{invocation}"
+    safe_stage = re.sub(r"[^a-zA-Z0-9-]+", "-", stage or phase).strip("-")
+    safe_unit = re.sub(r"[^a-zA-Z0-9-]+", "-", unit or role).strip("-")
+    filename = f"phase-usage-{phase}-{role}-{safe_stage}-{safe_unit}-{invocation}"
     path = workflow.ticket_contract_path(state.change_id or "invalid", attempt).parent / f"{filename}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(temporary, path)
     reference = _relative(path)
-    if role == "architect":
-        state.phase_usage[f"{phase}:{role}:{stage}:{unit}:{invocation}"] = reference
-        state.phase_usage[f"{phase}:{role}:{stage}:{unit}"] = reference
+    state.phase_usage[f"{phase}:{role}:{stage or phase}:{unit or role}:{invocation}"] = reference
+    state.phase_usage[f"{phase}:{role}:{stage or phase}:{unit or role}"] = reference
     state.phase_usage[f"{phase}:{role}"] = reference
     state.phase_usage[phase] = reference
     state.phase_attempts[phase] = state.phase_attempts.get(phase, 0) + 1
+
+
+def _next_contract_invocation(
+    change_id: str,
+    attempt: int,
+    phase: str,
+    role: str,
+    stage: str,
+    unit: str,
+) -> int:
+    safe_stage = re.sub(r"[^a-zA-Z0-9-]+", "-", stage).strip("-")
+    safe_unit = re.sub(r"[^a-zA-Z0-9-]+", "-", unit).strip("-")
+    directory = workflow.ticket_contract_path(change_id, attempt).parent
+    pattern = f"phase-usage-{phase}-{role}-{safe_stage}-{safe_unit}-*.json"
+    return len(list(directory.glob(pattern))) + 1
+
+
+def _contract_usage_path(
+    state: ExecutionState,
+    role: str,
+    stage: str,
+    unit: str,
+    invocation: int,
+) -> Path:
+    safe_stage = re.sub(r"[^a-zA-Z0-9-]+", "-", stage).strip("-")
+    safe_unit = re.sub(r"[^a-zA-Z0-9-]+", "-", unit).strip("-")
+    return workflow.ticket_contract_path(
+        state.change_id or "invalid", _attempt(state)
+    ).parent / f"phase-usage-{state.phase}-{role}-{safe_stage}-{safe_unit}-{invocation}.json"
+
+
+def _reconstruct_pending_contract_failure(
+    ticket_id: str,
+    state: ExecutionState,
+    *,
+    target: str,
+    role: str,
+    model_type: type[ModelT],
+    stage: str,
+    unit: str,
+    effective_limit: int | None,
+) -> None:
+    audit = state.phase_usage.get(f"contract_output_retry:{target}")
+    if not isinstance(audit, dict):
+        raise ValueError(f"Pending contract output retry has no audit for {target}")
+    invocation = audit.get("invocation")
+    if not isinstance(invocation, int) or invocation < 1:
+        raise ValueError(f"Pending contract output retry has no invocation for {target}")
+    if _contract_usage_path(state, role, stage, unit, invocation).exists():
+        return
+    validation_error = audit.get("validation_error")
+    if not isinstance(validation_error, str):
+        raise ValueError(f"Pending contract output retry has no validation error for {target}")
+    raw = audit.get("raw")
+    _record_usage(
+        state,
+        role,
+        SimpleNamespace(raw=raw if isinstance(raw, str) else None),
+        stage=stage,
+        unit=unit,
+        invocation=invocation,
+        status="failed",
+        effective_limit=effective_limit,
+        error=ValueError(validation_error),
+        expected_model=model_type.__name__,
+        retry_state="pending",
+    )
+    workflow.save_execution(ticket_id, state)
+
+
+def _dispatch_contract(
+    ticket_id: str,
+    state: ExecutionState,
+    *,
+    target: str,
+    role: str,
+    model_type: type[ModelT],
+    dispatch: Callable[[], object],
+    stage: str,
+    unit: str,
+    effective_limit: int | None = None,
+    retry: bool = False,
+    empty_response_retry: bool = False,
+    validate: Callable[[ModelT], None] | None = None,
+) -> ModelT:
+    retry_state = state.contract_output_retry_state.get(target, "available")
+    if retry_state == "consumed":
+        raise ContractOutputRetryExhausted(
+            f"Contract output retry outcome is uncertain or exhausted for {target}"
+        )
+    if retry_state == "pending":
+        _reconstruct_pending_contract_failure(
+            ticket_id,
+            state,
+            target=target,
+            role=role,
+            model_type=model_type,
+            stage=stage,
+            unit=unit,
+            effective_limit=effective_limit,
+        )
+        state.contract_output_retry_state[target] = "consumed"
+        workflow.save_execution(ticket_id, state)
+
+    attempt = _attempt(state)
+    invocation = _next_contract_invocation(
+        state.change_id or "invalid", attempt, state.phase, role, stage, unit
+    )
+    output = None
+    try:
+        output = dispatch()
+    except Exception as error:
+        if role == "architect" and _is_empty_architect_response(error):
+            output = error
+        else:
+            _record_usage(
+                state,
+                role,
+                error,
+                stage=stage,
+                unit=unit,
+                invocation=invocation,
+                status="failed",
+                effective_limit=effective_limit,
+                error=error,
+                retry=retry or empty_response_retry or retry_state == "pending",
+                expected_model=model_type.__name__,
+                retry_state=retry_state,
+            )
+            workflow.save_execution(ticket_id, state)
+            raise
+    try:
+        if role == "architect" and _is_empty_architect_response(output):
+            raise EmptyArchitectResponse(EMPTY_ARCHITECT_RESPONSE)
+        result = _as_model(output, model_type)
+    except EmptyArchitectResponse as error:
+        empty_retry_state = state.planning_empty_response_retry_state
+        if empty_retry_state == "available":
+            state.planning_empty_response_retry_state = "pending"
+            state.planning_empty_response_retry_target = unit
+            state.phase_usage["planning:architect_empty_response_retries"] = 1
+            workflow.save_execution(ticket_id, state)
+        _record_usage(
+            state,
+            role,
+            output,
+            stage=stage,
+            unit=unit,
+            invocation=invocation,
+            status="failed",
+            effective_limit=effective_limit,
+            error=error,
+            retry=retry or empty_response_retry,
+            expected_model=model_type.__name__,
+            retry_state=empty_retry_state,
+        )
+        if empty_retry_state == "available":
+            state.planning_empty_response_retry_state = "consumed"
+            workflow.save_execution(ticket_id, state)
+            return _dispatch_contract(
+                ticket_id,
+                state,
+                target=target,
+                role=role,
+                model_type=model_type,
+                dispatch=dispatch,
+                stage=stage,
+                unit=unit,
+                effective_limit=effective_limit,
+                retry=retry,
+                empty_response_retry=True,
+                validate=validate,
+            )
+        workflow.save_execution(ticket_id, state)
+        raise
+    except ValueError as error:
+        if retry_state == "available":
+            state.contract_output_retry_state[target] = "pending"
+            state.phase_usage[f"contract_output_retry:{target}"] = {
+                "raw": getattr(output, "raw", None)
+                if isinstance(getattr(output, "raw", None), str)
+                else None,
+                "expected_model": model_type.__name__,
+                "validation_error": str(error),
+                "invocation": invocation,
+                "retry_state": "pending",
+            }
+            workflow.save_execution(ticket_id, state)
+        _record_usage(
+            state,
+            role,
+            output,
+            stage=stage,
+            unit=unit,
+            invocation=invocation,
+            status="failed",
+            effective_limit=effective_limit,
+            error=error,
+            retry=retry or empty_response_retry or retry_state == "pending",
+            expected_model=model_type.__name__,
+            retry_state=state.contract_output_retry_state.get(target, "available"),
+        )
+        if retry_state == "available":
+            workflow.save_execution(ticket_id, state)
+            return _dispatch_contract(
+                ticket_id,
+                state,
+                target=target,
+                role=role,
+                model_type=model_type,
+                dispatch=dispatch,
+                stage=stage,
+                unit=unit,
+                effective_limit=effective_limit,
+                retry=retry,
+                empty_response_retry=empty_response_retry,
+                validate=validate,
+            )
+        workflow.save_execution(ticket_id, state)
+        raise
+    try:
+        if validate is not None:
+            validate(result)
+    except ValueError as error:
+        _record_usage(
+            state,
+            role,
+            output,
+            stage=stage,
+            unit=unit,
+            invocation=invocation,
+            status="failed",
+            effective_limit=effective_limit,
+            error=error,
+            retry=retry or empty_response_retry or retry_state == "pending",
+            expected_model=model_type.__name__,
+            retry_state=retry_state,
+        )
+        workflow.save_execution(ticket_id, state)
+        raise
+    _record_usage(
+        state,
+        role,
+        output,
+        stage=stage,
+        unit=unit,
+        invocation=invocation,
+        effective_limit=effective_limit,
+        retry=retry or empty_response_retry or retry_state == "pending",
+        expected_model=model_type.__name__,
+        retry_state=state.contract_output_retry_state.get(target, "available"),
+    )
+    workflow.save_execution(ticket_id, state)
+    return result
+
+
+def _acknowledge_contract_success(
+    ticket_id: str, state: ExecutionState, target: str
+) -> None:
+    if state.contract_output_retry_state.get(target) == "consumed":
+        del state.contract_output_retry_state[target]
+        workflow.save_execution(ticket_id, state)
 
 
 def _reset_for_planning(state: ExecutionState, ticket_sha256: str) -> ExecutionState:
@@ -256,6 +541,7 @@ def _reset_for_planning(state: ExecutionState, ticket_sha256: str) -> ExecutionS
     state.ticket_contract_path = None
     state.planning_checkpoint_path = None
     state.planning_checkpoint_sha256 = None
+    state.contract_output_retry_state = {}
     state.planning_empty_response_retry_state = "available"
     state.planning_empty_response_retry_target = None
     state.plan_manifest_path = None
@@ -390,6 +676,15 @@ def _architect_limit(stage: str, *, retry: bool = False) -> int:
     return int(os.environ.get(name, "16000" if retry else "8000"))
 
 
+def _validate_artifact_unit(
+    unit: PlanArtifactUnit, requested: PlanUnitOutline
+) -> None:
+    if unit.unit_key != requested.unit_key:
+        raise ValueError(
+            f"Architect returned {unit.unit_key} for requested unit {requested.unit_key}"
+        )
+
+
 def _save_planning_checkpoint(
     ticket_id: str,
     state: ExecutionState,
@@ -430,12 +725,15 @@ def _validate_empty_retry_resume(
         )
 
 
-def _next_architect_invocation(
-    change_id: str, attempt: int, stage: str, unit: str
-) -> int:
-    safe_unit = re.sub(r"[^a-zA-Z0-9-]+", "-", unit).strip("-")
-    directory = workflow.ticket_contract_path(change_id, attempt).parent
-    return len(list(directory.glob(f"phase-usage-planning-architect-{stage}-{safe_unit}-*.json"))) + 1
+def _consume_empty_response_retry(
+    ticket_id: str, state: ExecutionState, target: str
+) -> None:
+    if state.planning_empty_response_retry_state != "pending":
+        return
+    if state.planning_empty_response_retry_target != target:
+        raise ValueError("Architect empty-response retry target is stale")
+    state.planning_empty_response_retry_state = "consumed"
+    workflow.save_execution(ticket_id, state)
 
 
 def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> ExecutionState:
@@ -451,19 +749,36 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
                 raise ValueError("Execution state TicketContract path is stale")
             contract = workflow.load_model(contract_path, TicketContract)
         else:
-            analyst = kickoff_role(
-                "analyst",
-                inputs={
-                    "ticket_id": ticket_id,
-                    "change_id": change_id,
-                    "ticket_sha256": ticket_sha256,
-                },
+            def validate_contract(value: TicketContract) -> None:
+                if (value.ticket_id, value.change_id, value.ticket_sha256) != (
+                    ticket_id,
+                    change_id,
+                    ticket_sha256,
+                ):
+                    raise ValueError("TicketContract does not match the current ticket")
+
+            contract = _dispatch_contract(
+                ticket_id,
+                state,
+                target="analyst",
+                role="analyst",
+                model_type=TicketContract,
+                dispatch=lambda: kickoff_role(
+                    "analyst",
+                    inputs={
+                        "ticket_id": ticket_id,
+                        "change_id": change_id,
+                        "ticket_sha256": ticket_sha256,
+                    },
+                ),
+                stage="planning",
+                unit="analyst",
+                validate=validate_contract,
             )
-            contract = _as_model(analyst, TicketContract)
-            _record_usage(state, "analyst", analyst)
             workflow.save_model(contract_path, contract)
             state.ticket_contract_path = _relative(contract_path)
             workflow.save_execution(ticket_id, state)
+            _acknowledge_contract_success(ticket_id, state, "analyst")
         if (contract.ticket_id, contract.change_id, contract.ticket_sha256) != (
             ticket_id,
             change_id,
@@ -518,65 +833,25 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
                 "ticket_contract_json": contract.model_dump_json(),
                 "context_index": render_context_index(catalog),
             }
-            while True:
-                invocation = _next_architect_invocation(
-                    change_id, attempt, "outline", "outline"
-                )
-                if state.planning_empty_response_retry_state == "pending":
-                    if state.planning_empty_response_retry_target != "outline":
-                        raise ValueError("Architect empty-response retry target is stale")
-                    state.planning_empty_response_retry_state = "consumed"
-                    workflow.save_execution(ticket_id, state)
-                output = None
-                try:
-                    output = kickoff_architect_outline(inputs=outline_inputs)
-                    plan_outline = _as_model(output, PlanOutline)
-                    validate_plan_outline(
-                        plan_outline,
-                        contract,
-                        catalog,
-                        int(os.environ.get("ZEN_ARCHITECT_MAX_CONTEXT_REFS", "12")),
-                        int(os.environ.get("ZEN_ARCHITECT_MAX_CONTEXT_CHARS", "48000")),
-                    )
-                except Exception as error:
-                    empty_retry_scheduled = (
-                        isinstance(error, ValueError)
-                        and str(error) == EMPTY_ARCHITECT_RESPONSE
-                        and state.planning_empty_response_retry_state == "available"
-                    )
-                    if empty_retry_scheduled:
-                        state.planning_empty_response_retry_state = "pending"
-                        state.planning_empty_response_retry_target = "outline"
-                        state.phase_usage[
-                            "planning:architect_empty_response_retries"
-                        ] = 1
-                        workflow.save_execution(ticket_id, state)
-                    _record_usage(
-                        state,
-                        "architect",
-                        output if output is not None else error,
-                        stage="outline",
-                        unit="outline",
-                        invocation=invocation,
-                        status="failed",
-                        effective_limit=_architect_limit("outline"),
-                        error=error,
-                    )
-                    workflow.save_execution(ticket_id, state)
-                    if empty_retry_scheduled:
-                        continue
-                    raise
-                _record_usage(
-                    state,
-                    "architect",
-                    output,
-                    stage="outline",
-                    unit="outline",
-                    invocation=invocation,
-                    effective_limit=_architect_limit("outline"),
-                )
-                workflow.save_execution(ticket_id, state)
-                break
+            _consume_empty_response_retry(ticket_id, state, "outline")
+            plan_outline = _dispatch_contract(
+                ticket_id,
+                state,
+                target="architect:outline",
+                role="architect",
+                model_type=PlanOutline,
+                dispatch=lambda: kickoff_architect_outline(inputs=outline_inputs),
+                stage="outline",
+                unit="outline",
+                effective_limit=_architect_limit("outline"),
+                validate=lambda value: validate_plan_outline(
+                    value,
+                    contract,
+                    catalog,
+                    int(os.environ.get("ZEN_ARCHITECT_MAX_CONTEXT_REFS", "12")),
+                    int(os.environ.get("ZEN_ARCHITECT_MAX_CONTEXT_CHARS", "48000")),
+                ),
+            )
             checkpoint = PlanningCheckpoint(
                 ticket_contract_sha256=canonical_model_sha256(contract),
                 context_catalog_sha256=canonical_model_sha256(catalog),
@@ -585,6 +860,7 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
                 invocation_status={unit.unit_key: "pending" for unit in plan_outline.units},
             )
             _save_planning_checkpoint(ticket_id, state, checkpoint_path, checkpoint)
+            _acknowledge_contract_success(ticket_id, state, "architect:outline")
 
         completed = {unit.unit_key for unit in checkpoint.units}
         length_retry_enabled = int(
@@ -604,19 +880,8 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
                     int(os.environ.get("ZEN_ARCHITECT_MAX_CONTEXT_CHARS", "48000")),
                 ),
             }
-            invocation = _next_architect_invocation(
-                change_id, attempt, "artifact", requested.unit_key
-            )
             while True:
-                empty_retry = state.planning_empty_response_retry_state == "pending"
-                if empty_retry:
-                    if (
-                        state.planning_empty_response_retry_target
-                        != requested.unit_key
-                    ):
-                        raise ValueError("Architect empty-response retry target is stale")
-                    state.planning_empty_response_retry_state = "consumed"
-                    workflow.save_execution(ticket_id, state)
+                _consume_empty_response_retry(ticket_id, state, requested.unit_key)
                 retry_status = checkpoint.length_retry_status.get(requested.unit_key)
                 if retry_status == "pending":
                     checkpoint.length_retry_status[requested.unit_key] = "consumed"
@@ -628,22 +893,29 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
                     retry_status == "consumed"
                     and checkpoint.invocation_status.get(requested.unit_key) == "failed"
                 ):
-                    if empty_retry:
-                        retry = True
-                    else:
-                        raise ValueError(
-                            f"Architect length retry exhausted for {requested.unit_key}"
-                        )
+                    raise ValueError(
+                        f"Architect length retry exhausted for {requested.unit_key}"
+                    )
                 else:
                     retry = False
-                output = None
                 try:
-                    output = kickoff_architect_artifact(inputs=artifact_inputs, retry=retry)
-                    unit = _as_model(output, PlanArtifactUnit)
-                    if unit.unit_key != requested.unit_key:
-                        raise ValueError(
-                            f"Architect returned {unit.unit_key} for requested unit {requested.unit_key}"
+                    unit = _dispatch_contract(
+                        ticket_id,
+                        state,
+                        target=f"architect:artifact:{requested.unit_key}",
+                        role="architect",
+                        model_type=PlanArtifactUnit,
+                        dispatch=lambda: kickoff_architect_artifact(
+                            inputs=artifact_inputs, retry=retry
+                        ),
+                        stage="artifact",
+                        unit=requested.unit_key,
+                        effective_limit=_architect_limit("artifact", retry=retry),
+                        retry=retry,
+                        validate=lambda value: _validate_artifact_unit(value, requested),
                     )
+                except ContractOutputRetryExhausted:
+                    raise
                 except Exception as error:
                     checkpoint.invocation_status[requested.unit_key] = "failed"
                     length_retry_scheduled = (
@@ -654,56 +926,19 @@ def run_planning(ticket_id: str, change_id: str, state: ExecutionState) -> Execu
                     )
                     if length_retry_scheduled:
                         checkpoint.length_retry_status[requested.unit_key] = "pending"
-                    empty_retry_scheduled = (
-                        isinstance(error, ValueError)
-                        and str(error) == EMPTY_ARCHITECT_RESPONSE
-                        and state.planning_empty_response_retry_state == "available"
-                    )
-                    if empty_retry_scheduled:
-                        state.planning_empty_response_retry_state = "pending"
-                        state.planning_empty_response_retry_target = requested.unit_key
-                        state.phase_usage[
-                            "planning:architect_empty_response_retries"
-                        ] = 1
-                        workflow.save_execution(ticket_id, state)
-                    _record_usage(
-                        state,
-                        "architect",
-                        output if output is not None else error,
-                        stage="artifact",
-                        unit=requested.unit_key,
-                        invocation=invocation,
-                        status="failed",
-                        effective_limit=_architect_limit("artifact", retry=retry),
-                        error=error,
-                        retry=retry,
-                    )
                     _save_planning_checkpoint(ticket_id, state, checkpoint_path, checkpoint)
-                    if empty_retry_scheduled:
-                        invocation = _next_architect_invocation(
-                            change_id, attempt, "artifact", requested.unit_key
-                        )
-                        continue
                     if length_retry_scheduled:
-                        invocation = _next_architect_invocation(
-                            change_id, attempt, "artifact", requested.unit_key
-                        )
                         continue
                     raise
-                _record_usage(
-                    state,
-                    "architect",
-                    output,
-                    stage="artifact",
-                    unit=requested.unit_key,
-                    invocation=invocation,
-                    effective_limit=_architect_limit("artifact", retry=retry),
-                    retry=retry,
-                )
                 checkpoint.units.append(unit)
                 checkpoint.unit_sha256[unit.unit_key] = canonical_model_sha256(unit)
                 checkpoint.invocation_status[unit.unit_key] = "completed"
                 _save_planning_checkpoint(ticket_id, state, checkpoint_path, checkpoint)
+                _acknowledge_contract_success(
+                    ticket_id,
+                    state,
+                    f"architect:artifact:{requested.unit_key}",
+                )
                 completed.add(unit.unit_key)
                 break
 
@@ -882,21 +1117,32 @@ def run_browser_testing(ticket_id: str, change_id: str, state: ExecutionState) -
             state.browser_result_path = _relative(path)
             state.phase = "reviewing"
             return state
-        output = kickoff_role(
-            "tester",
-            inputs={
-                "verification_profile_path": _relative(active_change(change_id) / "design.md"),
-                "scenario_paths": "NONE",
-            },
+        result = _dispatch_contract(
+            ticket_id,
+            state,
+            target="tester",
+            role="tester",
+            model_type=TesterResult,
+            dispatch=lambda: kickoff_role(
+                "tester",
+                inputs={
+                    "verification_profile_path": _relative(
+                        active_change(change_id) / "design.md"
+                    ),
+                    "scenario_paths": "NONE",
+                },
+            ),
+            stage="browser_testing",
+            unit="tester",
         )
-        _record_usage(state, "tester", output)
-        result = _as_model(output, TesterResult)
         workflow.save_model(path, result)
         state.browser_result_path = _relative(path)
         if result.status == "passed":
             state.phase = "reviewing"
+            workflow.save_execution(ticket_id, state)
+            _acknowledge_contract_success(ticket_id, state, "tester")
             return state
-        return _save_repair_pack(
+        state = _save_repair_pack(
             change_id,
             state,
             manifest,
@@ -904,6 +1150,9 @@ def run_browser_testing(ticket_id: str, change_id: str, state: ExecutionState) -
             "browser_testing",
             GateRun("browser_testing", False, f"browser-{_attempt(state)}", result.summary),
         )
+        workflow.save_execution(ticket_id, state)
+        _acknowledge_contract_success(ticket_id, state, "tester")
+        return state
     except Exception as error:
         return _block(state, error)
 
@@ -1032,16 +1281,30 @@ def run_review(ticket_id: str, change_id: str, state: ExecutionState) -> Executi
         workflow.save_model(path, pack)
         workflow.validate_review_pack(pack, expected_plan_sha256=state.plan_sha256)
         state.review_pack_path = _relative(path)
-        output = kickoff_role("reviewer", inputs={"review_pack_path": state.review_pack_path})
-        _record_usage(state, "reviewer", output)
-        verdict = _as_model(output, ReviewVerdict)
-        if verdict.ticket_id != ticket_id or verdict.change_id != change_id:
-            raise ValueError("ReviewVerdict does not match the current ticket")
+        def validate_verdict(value: ReviewVerdict) -> None:
+            if value.ticket_id != ticket_id or value.change_id != change_id:
+                raise ValueError("ReviewVerdict does not match the current ticket")
+
+        verdict = _dispatch_contract(
+            ticket_id,
+            state,
+            target="reviewer",
+            role="reviewer",
+            model_type=ReviewVerdict,
+            dispatch=lambda: kickoff_role(
+                "reviewer", inputs={"review_pack_path": state.review_pack_path}
+            ),
+            stage="reviewing",
+            unit="reviewer",
+            validate=validate_verdict,
+        )
         if verdict.status == "approved":
             state.phase = "approved"
+            workflow.save_execution(ticket_id, state)
+            _acknowledge_contract_success(ticket_id, state, "reviewer")
             return state
         if verdict.status == "retryable_failure":
-            return _save_repair_pack(
+            state = _save_repair_pack(
                 change_id,
                 state,
                 manifest,
@@ -1049,7 +1312,12 @@ def run_review(ticket_id: str, change_id: str, state: ExecutionState) -> Executi
                 "reviewing",
                 GateRun("reviewer", False, f"reviewer-{_attempt(state)}", verdict.summary),
             )
+            workflow.save_execution(ticket_id, state)
+            _acknowledge_contract_success(ticket_id, state, "reviewer")
+            return state
         state.phase = "blocked"
+        workflow.save_execution(ticket_id, state)
+        _acknowledge_contract_success(ticket_id, state, "reviewer")
         return state
     except (OSError, ValueError, KeyError) as error:
         state.phase = "blocked"

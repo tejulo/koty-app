@@ -20,6 +20,9 @@ finalization supervisor.
   and browser result for the active OpenSpec change attempt.
 - Drive Analyst, Architect, Programmer, Tester, and Reviewer as isolated
   phase invocations through a persisted execution state machine.
+- Transport Analyst, Architect, Tester, and Reviewer contracts as raw JSON text
+  and validate them locally with the authoritative Pydantic contract before
+  semantic processing; Programmer remains intentionally unstructured.
 - Preserve the base `python`, `lint`, `test`, `build`, `integration`, and
   strict OpenSpec validation gates for every verification profile.
 - Support only `standard`, `browser`, `operational`, and
@@ -60,6 +63,7 @@ after interruption without changing the final PlanDraft or PlanManifest.
 | Lower limits stop complex work early | Keep per-role limits configurable and persist the raw CrewAI usage payload when available. |
 | A staged call exceeds its output limit | Disable hidden CrewAI retries and let the supervisor retry only that unit once with the configured retry budget. |
 | Partial planning leaks into the active change | Checkpoint validated units under the attempt and promote only the assembled, validated PlanDraft. |
+| Provider-specific structured output rejects or mutates a contract | Require raw JSON text, validate it locally with Pydantic, and persist the invalid output and one supervisor-owned retry. |
 
 ## Acceptance Criteria Traceability
 
@@ -70,5 +74,5 @@ after interruption without changing the final PlanDraft or PlanManifest.
 | AC-003 Retry only the phase able to repair a recoverable failure | Deterministic phase transitions |
 | AC-004 Reject stale inputs and write state atomically | Hash validation and atomic execution state; Durable staged-planning checkpoints |
 | AC-005 Give Reviewer complete, compact, hash-backed evidence | ReviewPack evidence |
-| AC-006 Persist bounded role usage for token calibration | Token usage observability; Bounded per-unit planning context; Supervisor-owned Architect length retries |
+| AC-006 Persist bounded role usage for token calibration | Token usage observability; Portable raw JSON contract transport; Bounded per-unit planning context; Supervisor-owned Architect length retries |
 | AC-007 Support resume, explicit replan, and local Ralph supervision | Resume, replan, and Ralph supervision |
